@@ -1,4 +1,4 @@
-[![Python tests](https://github.com/FusionSolutions/python-fsrpcclient/actions/workflows/python-package.yml/badge.svg?branch=main)](https://github.com/FusionSolutions/python-fsrpcclient/actions/workflows/python-package.yml)
+[![Python tests](https://github.com/FusionSolutions/python-fsrpcclient/actions/workflows/python-package.yml/badge.svg?branch=master)](https://github.com/FusionSolutions/python-fsrpcclient/actions/workflows/python-package.yml)
 # Fusion Solutions RPC client
 
 ## Introduction
