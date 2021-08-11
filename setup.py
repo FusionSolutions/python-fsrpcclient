@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import os
-from fsRPCClient.__version__ import __version__ as version
+import fsRPCClient
 try:
 	from setuptools import setup
 except ImportError:
@@ -10,7 +10,7 @@ pwd = os.path.abspath(os.path.dirname(__file__))
 
 setup(
 	name                          = "python-fsrpcclient",
-	version                       = version,
+	version                       = fsRPCClient.__version__,
 	description                   = "Fusion Solutions RPC client",
 	keywords                      = "json rpc client fusion solutions fusionsolutions",
 	author                        = "Andor `iFA` Rajci - FUSION SOLUTIONS Kft",
