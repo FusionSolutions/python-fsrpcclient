@@ -26,9 +26,8 @@ class T_Client(metaclass=ABCMeta):
 	sslHostname:Optional[str]
 	httpHost:Optional[str]
 	extraHttpHeaders:Dict[str, str]
-	httpMethod:str
-	httpPath:str
 	disableCompression:bool
+	useBulkRequest:bool
 	log:Logger
 	signal:T_Signal
 	id:int
@@ -75,10 +74,8 @@ class T_BaseClientSocket(metaclass=ABCMeta):
 class T_HTTPClientSocket(T_BaseClientSocket, metaclass=ABCMeta):
 	defaultHeaders:Dict[str, str]
 	headers:Headers
-	httpMethod:str
-	path:str
 	@abstractmethod
-	def send(self, payload:bytes, headers:Dict[str, str]=...) -> None: ...
+	def send(self, payload:bytes, path:str=..., headers:Dict[str, str]=...) -> None: ...
 
 class T_StringClientSocket(T_BaseClientSocket, metaclass=ABCMeta):
 	@abstractmethod
@@ -94,6 +91,8 @@ class T_Request(metaclass=ABCMeta):
 	_method:str
 	_args:List[Any]
 	_kwargs:Dict[Any, Any]
+	_auth:Optional[str]
+	_path:str
 	_requestTime:float
 	_responseTime:float
 	_uid:str

@@ -1,7 +1,7 @@
 # Builtin modules
 from __future__ import annotations
 import zlib
-from typing import Dict, Any, List, Tuple, Iterator, Iterable, Optional, cast, Generator
+from typing import Dict, Any, List, Tuple, Iterator, Iterable, Optional, Generator, cast
 # Local modules
 # Program
 class Headers:

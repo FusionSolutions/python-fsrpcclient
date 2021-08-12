@@ -283,14 +283,13 @@ class HTTPClientSocket(BaseClientSocket, T_HTTPClientSocket):
 	}
 	def __init__(self, client:T_Client, protocol:str, target:Union[str, Tuple[str, int], Tuple[str, int, int, int]],
 	connectionTimeout:Union[int, float], transferTimeout:Union[int, float], ssl:bool=False, sslHostname:Optional[str]=None,
-	extraHeaders:Dict[str, str]={}, httpMethod:str="POST", path:str="/", disableCompression:bool=False):
+	extraHeaders:Dict[str, str]={}, disableCompression:bool=False) -> None:
 		super().__init__(client, protocol, target, connectionTimeout, transferTimeout, ssl, sslHostname)
 		self.headers = Headers(self.defaultHeaders)
 		self.headers.update(extraHeaders)
 		if not disableCompression:
 			self.headers.update({"Accept-Encoding":"deflate"})
-		self.httpMethod = httpMethod
-		self.path = path
+		return None
 	def parseReadBuffer(self) -> bool:
 		endLine = b"\r\n"
 		pos = self.readBuffer.find(endLine*2)
@@ -299,8 +298,9 @@ class HTTPClientSocket(BaseClientSocket, T_HTTPClientSocket):
 			pos = self.readBuffer.find(endLine*2)
 		elif pos > 4096:
 			self._raiseMessageError("HTTP headers are too long")
+		endLineLen = len(endLine)
 		while pos != -1:
-			rawData = self.readBuffer[pos+len(endLine)*2:]
+			rawData = self.readBuffer[pos+endLineLen*2:]
 			rawHeaders = self.readBuffer[:pos].decode("ISO-8859-1").split(endLine.decode("ISO-8859-1"))
 			if not rawHeaders:
 				self._raiseMessageError("Invalid HTTP headers")
@@ -320,11 +320,15 @@ class HTTPClientSocket(BaseClientSocket, T_HTTPClientSocket):
 					return
 				headers[ rawHeader[:s].strip() ] = rawHeader[s+1:].strip()
 			cLengthStr = headers.get("content-length", "")
-			if not cLengthStr.isdigit():
-				self._raiseMessageError("Invalid HTTP header value for content-length")
-			cLength = int(cLengthStr)
-			if cLength < 0:
-				self._raiseMessageError("Invalid HTTP header value for content-length")
+			cLength:Optional[int] = None
+			if cLengthStr:
+				if not cLengthStr.isdigit():
+					self._raiseMessageError("Invalid HTTP header value for content-length")
+				cLength = int(cLengthStr)
+				if cLength < 0:
+					self._raiseMessageError("Invalid HTTP header value for content-length")
+			elif "chunked" not in headers.get("transfer-encoding", "").lower():
+				self._raiseMessageError("Invalid HTTP transfer encoding. Not chunked and no content-length given.")
 			cEncoding = headers.get("content-encoding", "")
 			if cEncoding == "":
 				compression = False
@@ -343,25 +347,56 @@ class HTTPClientSocket(BaseClientSocket, T_HTTPClientSocket):
 				self._raiseMessageError("Not supported charset")
 			headers["content-type"] = cType
 			#
-			if len(rawData) < cLength:
-				return False
+			payload = b""
+			if cLength is None:
+				# Chunked: data_size:int + endline:bytes + data:bytes
+				rawDataCache = rawData
+				EOC = False
+				pos = rawDataCache.find(endLine)
+				cLength = 0
+				while pos != -1:
+					cLength += endLineLen
+					if pos == 0:
+						# end of chunks
+						EOC = True
+						break
+					rawChunk = rawDataCache[:pos]
+					rawDataCache = rawDataCache[pos+endLineLen:]
+					try:
+						chunkLength = int(rawChunk, 16)
+					except:
+						self._raiseMessageError("Invalid HTTP chunk length")
+					if chunkLength > 0xFFFFFF:
+						self._raiseMessageError("HTTP chunk too big")
+					if chunkLength > len(rawDataCache):
+						return False
+					payload += rawDataCache[:chunkLength]
+					cLength += chunkLength
+					rawDataCache = rawDataCache[chunkLength:]
+					pos = rawDataCache.find(endLine)
+				if not EOC:
+					return False
+			else:
+				if len(rawData) < cLength:
+					return False
+				payload = rawData[:cLength]
+			assert isinstance(cLength, int)
+			self.readBuffer = self.readBuffer[pos+endLineLen*2+cLength:]
 			#
-			self.readBuffer = self.readBuffer[pos+len(endLine)*2+cLength:]
-			try:
-				if compression:
-					payload = deflate.decompress(rawData[:cLength])
-				else:
-					payload = rawData[:cLength]
-			except:
-				self._raiseMessageError("Invalid response content")
+			if compression:
+				try:
+					payload = deflate.decompress(payload)
+				except:
+					self._raiseMessageError("Invalid response content")
 			if self.log.isFiltered("TRACE"):
 				self.log.trace("Payload [len: {}]: {}", len(payload), payload)
 			self.client._parseResponse(payload, headers, charset)
 			pos = self.readBuffer.find(endLine*2)
 		return False
-	def send(self, payload:bytes, headers:Dict[str, str]={}) -> None:
-		rawHeader = "{} {} HTTP/1.1\r\n".format(self.httpMethod, self.path)
-		headers["content-length"] = str(len(payload))
+	def send(self, payload:bytes=b"", path:str="/", headers:Dict[str, str]={}) -> None:
+		rawHeader = "{} {} HTTP/1.1\r\n".format("POST" if payload else "GET", path)
+		if payload:
+			headers["content-length"] = str(len(payload))
 		rawHeader += self.headers.dumps(extend=headers)
 		rawHeader += "\r\n\r\n"
 		self._write( rawHeader.encode("iso-8859-1") + payload )
