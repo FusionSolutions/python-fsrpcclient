@@ -2,7 +2,7 @@
 from __future__ import annotations
 import json, weakref
 from time import monotonic
-from typing import Any, Union, List, Dict, Tuple, Optional, cast
+from typing import Any, Union, List, Dict, Tuple, Optional, Callable, cast
 # Third party modules
 import fsPacker
 from fsLogger import Logger
@@ -13,12 +13,14 @@ from .utils import iterSplit, Headers
 from .clientSocket import HTTPClientSocket, StringClientSocket, FSPackerClientSocket
 from .abcs import T_Request, T_Client
 # Program
+_dumpRequest:Callable[[T_Request], Any] = lambda x: x._dumps()
+
 class Client(T_Client):
 	max_bulk_request = 0xFF
 	def __init__(self, protocol:str, target:Union[str, Tuple[str, int], Tuple[str, int, int, int]], connectionTimeout:int=15,
 	transferTimeout:int=320, retryCount:int=10, retryDelay:int=5, ssl:bool=False, sslHostname:Optional[str]=None,
-	httpHost:Optional[str]=None, extraHttpHeaders:Dict[str, str]={}, httpMethod:str="POST", httpPath:str="/",
-	disableCompression:bool=False, log:Optional[Logger]=None, signal:Optional[T_Signal]=None):
+	httpHost:Optional[str]=None, extraHttpHeaders:Dict[str, str]={}, disableCompression:bool=False, useBulkRequest:bool=True,
+	log:Optional[Logger]=None, signal:Optional[T_Signal]=None):
 		self.protocol           = protocol
 		self.connectionTimeout  = connectionTimeout
 		self.transferTimeout    = transferTimeout
@@ -28,9 +30,8 @@ class Client(T_Client):
 		self.sslHostname        = sslHostname
 		self.httpHost           = httpHost
 		self.extraHttpHeaders   = extraHttpHeaders
-		self.httpMethod         = httpMethod
-		self.httpPath           = httpPath
 		self.disableCompression = disableCompression
+		self.useBulkRequest     = useBulkRequest
 		self.log                = log or Logger("RPCClient")
 		self.signal             = signal or HardSignal
 		self.id                 = 0
@@ -87,9 +88,8 @@ class Client(T_Client):
 			"sslHostname":       self.sslHostname,
 			"httpHost":          self.httpHost,
 			"extraHttpHeaders":  self.extraHttpHeaders,
-			"httpMethod":        self.httpMethod,
-			"httpPath":          self.httpPath,
 			"disableCompression":self.disableCompression,
+			"useBulkRequest":    self.useBulkRequest,
 			"log":               self.log,
 			"signal":            self.signal,
 		}
@@ -104,9 +104,8 @@ class Client(T_Client):
 		self.sslHostname        = states["sslHostname"]
 		self.httpHost           = states["httpHost"]
 		self.extraHttpHeaders   = states["extraHttpHeaders"]
-		self.httpMethod         = states["httpMethod"]
-		self.httpPath           = states["httpPath"]
 		self.disableCompression = states["disableCompression"]
+		self.useBulkRequest     = states["useBulkRequest"]
 		self.log                = states["log"]
 		self.signal             = states["signal"]
 		self.id                 = 0
@@ -118,15 +117,15 @@ class Client(T_Client):
 			objs:List[T_Request] = list(filter(lambda x: not x.isDone(), self.requests.values()))
 			if objs:
 				objs.sort(key=lambda x: x._requestTime)
-				chunks = [ obj._dumps() for obj in objs ]
-				if chunks:
-					self.log.info("Sending {} previous requests", len(chunks))
-					if len(chunks) > 1:
-						for chunk in iterSplit(chunks, self.max_bulk_request):
-							self._sendRequest(chunk)
-					else:
-						self._sendRequest(chunks[0])
-	def _sendRequest(self, data:Any) -> None:
+				self.log.info("Sending {} previous requests", len(objs))
+				chunkToSend:Any
+				if self.useBulkRequest and len(objs) > 1:
+					for chunk in iterSplit(list(map(_dumpRequest, objs)), self.max_bulk_request):
+						self._sendRequest(chunk)
+				else:
+					for obj in objs:
+						self._sendRequest(obj._dumps(), path=obj._path)
+	def _sendRequest(self, data:Any, path:str="/") -> None:
 		payload:bytes
 		if isinstance(self.socket, HTTPClientSocket):
 			extraHttpHeaders:Dict[str, str]={}
@@ -139,7 +138,7 @@ class Client(T_Client):
 				payload = fsPacker.dumps(data)
 			else:
 				raise RuntimeError
-			self.socket.send(payload, extraHttpHeaders)
+			self.socket.send(payload, path, extraHttpHeaders)
 		elif isinstance(self.socket, FSPackerClientSocket):
 			if self.requestProtocol in ["JSONRPC-2", "JSONRPC-P"]:
 				payload = json.dumps(data).encode('utf8')
@@ -170,8 +169,6 @@ class Client(T_Client):
 					ssl                = self.ssl,
 					sslHostname        = self.sslHostname,
 					extraHeaders       = self.extraHttpHeaders,
-					httpMethod         = self.httpMethod,
-					path               = self.httpPath,
 					disableCompression = self.disableCompression,
 				)
 			elif self.messageProtocol == "STR":
@@ -285,7 +282,7 @@ class Client(T_Client):
 			del self.socket
 			self.clear()
 	def request(self, method:str, args:List[Any]=[], kwargs:Dict[str, Any]={}, id:Optional[Union[str, int]]=None,
-	auth:Optional[str]=None) -> Any:
+	auth:Optional[str]=None, path:str="/") -> Any:
 		if id is None:
 			id = self.id
 			self.id += 1
@@ -300,6 +297,7 @@ class Client(T_Client):
 			args,
 			kwargs,
 			auth,
+			path,
 		)
 		self.requests[id] = obj
 		self.log.info("Request queued: {} [{}]".format(method, id))
@@ -310,13 +308,15 @@ class Client(T_Client):
 class Request(T_Request):
 	__slots__ = ("_client", "_id", "_method", "_args", "_kwargs", "_auth", "_requestTime", "_responseTime", "_uid", "_done",
 	"_success", "_response")
-	def __init__(self, client:T_Client, id:Any, method:str, args:List[Any], kwargs:Dict[str, Any], auth:Optional[str]=None):
+	def __init__(self, client:T_Client, id:Any, method:str, args:List[Any], kwargs:Dict[str, Any], auth:Optional[str]=None,
+	path:str="/"):
 		self._client = client
 		self._id = id
 		self._method = method
 		self._args = args
 		self._kwargs = kwargs
 		self._auth = auth
+		self._path = path
 		self._requestTime = monotonic()
 		self._responseTime = 0.0
 		self._uid = ""
@@ -333,23 +333,24 @@ class Request(T_Request):
 		self._success = isSuccess
 		self._response = result
 	def _dumps(self) -> Any:
-		if self._client.requestProtocol == "JSONRPC-2":
-			return {
-				"jsonrpc":"2.0",
-				"params":self._kwargs or self._args,
-				"method":self._method,
-				"id":self._id,
-			}
-		elif self._client.requestProtocol == "JSONRPC-P":
-			return {
-				"jsonrpc":"python",
-				"args":self._args,
-				"kwargs":self._kwargs,
-				"method":self._method,
-				"id":self._id,
-			}
-		elif self._client.requestProtocol == "FSP":
-			return (self._id, self._method, self._args, self._kwargs, self._auth)
+		if self._method:
+			if self._client.requestProtocol == "JSONRPC-2":
+				return {
+					"jsonrpc":"2.0",
+					"params":self._kwargs or self._args,
+					"method":self._method,
+					"id":self._id,
+				}
+			elif self._client.requestProtocol == "JSONRPC-P":
+				return {
+					"jsonrpc":"python",
+					"args":self._args,
+					"kwargs":self._kwargs,
+					"method":self._method,
+					"id":self._id,
+				}
+			elif self._client.requestProtocol == "FSP":
+				return (self._id, self._method, self._args, self._kwargs, self._auth)
 	def get(self) -> Any:
 		if not self._done:
 			self._get()
