@@ -1,8 +1,8 @@
 # Builtin modules
 from __future__ import annotations
 from abc import ABCMeta, abstractmethod
-from socket import socket
 from selectors import BaseSelector
+from ssl import SSLSession
 from typing import List, Dict, Tuple, Union, Callable, Optional, Any, MutableMapping
 # Third party modules
 from fsLogger import Logger
@@ -10,9 +10,26 @@ from fsSignal import T_Signal
 # Local modules
 from .utils import Headers
 # Program
-class T_Socket(socket, metaclass=ABCMeta):
+class T_Socket(metaclass=ABCMeta):
+	def __init__(self, family:int=..., type:int=..., proto:int=..., fileno:Optional[int]=...) -> None: ...
+	@abstractmethod
+	def fileno(self) -> int: ...
 	@abstractmethod
 	def do_handshake(self) -> None: ...
+	@abstractmethod
+	def close(self) -> None: ...
+	@abstractmethod
+	def setblocking(self, __flag:bool) -> None: ...
+	@abstractmethod
+	def send(self, __data:bytes, __flags:int=...) -> int: ...
+	@abstractmethod
+	def recv(self, __bufsize:int, __flags:int=...) -> bytes: ...
+	@abstractmethod
+	def connect_ex(self, __address:Union[Tuple[Any, ...], str]) -> int: ...
+
+class SSLContext(metaclass=ABCMeta):
+	def wrap_socket(self, sock:T_Socket, server_side:bool=..., do_handshake_on_connect:bool=..., suppress_ragged_eofs:bool=...,
+	server_hostname:Optional[str]=..., session:Optional[SSLSession]=...) -> T_Socket: ...
 
 class T_Client(metaclass=ABCMeta):
 	max_bulk_request:int
@@ -21,6 +38,7 @@ class T_Client(metaclass=ABCMeta):
 	connTimeout:int
 	transferTimeout:int
 	retryCount:int
+	socketErrors:int
 	retryDelay:int
 	ssl:bool
 	sslHostname:Optional[str]

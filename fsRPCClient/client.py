@@ -22,6 +22,7 @@ class Client(T_Client):
 	httpHost:Optional[str]=None, extraHttpHeaders:Dict[str, str]={}, disableCompression:bool=False, useBulkRequest:bool=True,
 	log:Optional[Logger]=None, signal:Optional[T_Signal]=None):
 		self.protocol           = protocol
+		self.target             = target
 		self.connectionTimeout  = connectionTimeout
 		self.transferTimeout    = transferTimeout
 		self.retryCount         = retryCount
@@ -36,6 +37,9 @@ class Client(T_Client):
 		self.signal             = signal or HardSignal
 		self.id                 = 0
 		self.requests           = weakref.WeakValueDictionary()
+		self.socketErrors       = 0
+		self._initializeProtocol()
+	def _initializeProtocol(self) -> None:
 		if ":" not in self.protocol:
 			raise InitializationError("Invalid protocol")
 		protocolParts = self.protocol.split(":")
@@ -43,16 +47,16 @@ class Client(T_Client):
 			raise InitializationError("Invalid protocol")
 		self.socketProtocol, self.messageProtocol, self.requestProtocol = protocolParts
 		if self.socketProtocol == "IPC":
-			self.target = cast(str, target)
+			self.target = cast(str, self.target)
 			if not isinstance(self.target, str):
 				raise InitializationError("Target must be path")
 		elif self.socketProtocol == "TCPv4":
-			self.target = cast(Tuple[str, int], target)
+			self.target = cast(Tuple[str, int], self.target)
 			if not isinstance(self.target, (tuple, list)) or len(self.target) != 2 or \
 			not isinstance(self.target[0], str) or not isinstance(self.target[1], int):
 				raise InitializationError("Target must be address and port in a list\tuple")
 		elif self.socketProtocol == "TCPv6":
-			self.target = cast(Tuple[str, int, int, int], target)
+			self.target = cast(Tuple[str, int, int, int], self.target)
 			if  not isinstance(self.target, (tuple, list)) or len(self.target) != 4 or \
 			not isinstance(self.target[0], str) or not isinstance(self.target[1], int) or \
 			not isinstance(self.target[2], int) or not isinstance(self.target[3], int):
@@ -65,11 +69,11 @@ class Client(T_Client):
 			raise InitializationError("Unsupported request protocol")
 		if self.log.isFiltered("TRACE"):
 			self.log.debug(
-				"Initialized  [sockProt: {}][msgProt: {}][reqProt: {}][target: {}][SSL: {}]",
+				"Protocol initialized  [sockProt: {}][msgProt: {}][reqProt: {}][target: {}][SSL: {}]",
 				self.socketProtocol, self.messageProtocol, self.requestProtocol, self.target, self.ssl
 			)
 		elif self.log.isFiltered("DEBUG"):
-			self.log.debug("Initialized")
+			self.log.debug("Protocol initialized")
 	def __del__(self) -> None:
 		self.close()
 	def __enter__(self) -> Any:
@@ -129,7 +133,7 @@ class Client(T_Client):
 		payload:bytes
 		if isinstance(self.socket, HTTPClientSocket):
 			extraHttpHeaders:Dict[str, str]={}
-			extraHttpHeaders["host"] = self.httpHost or self.target[0]
+			extraHttpHeaders["host"] = self.httpHost or "{}:{}".format(self.target[0], self.target[1])
 			if self.requestProtocol in ["JSONRPC-2", "JSONRPC-P"]:
 				extraHttpHeaders["Content-Type"] = "application/json;charset=utf-8"
 				payload = json.dumps(data).encode('utf8')
@@ -198,7 +202,7 @@ class Client(T_Client):
 			return not self.requests[id].isDone()
 		if id not in self.requests:
 			raise ResponseError("Unknown request ID: {}".format(id))
-		c = self.retryCount
+		self.socketErrors = self.retryCount
 		while True:
 			try:
 				self.signal.check()
@@ -213,9 +217,10 @@ class Client(T_Client):
 				raise
 			except SocketError:
 				self.log.warn("Error while getting response")
-				if c > 0:
-					self.signal.sleep(self.retryDelay)
-					c -= 1
+				if self.socketErrors > 0:
+					if self.socketErrors != self.retryCount:
+						self.signal.sleep(self.retryDelay)
+					self.socketErrors -= 1
 					del self.socket
 					continue
 				raise
@@ -272,7 +277,7 @@ class Client(T_Client):
 		obj._parseResponse( id, isSuccess, result, uid )
 	def clear(self) -> None:
 		self.requests.clear()
-	def clone(self, **kwargs:Dict[str, Any]) -> Client:
+	def clone(self, **kwargs:Any) -> Client:
 		opts = self.__getstate__()
 		opts.update(kwargs)
 		return Client(**opts)
@@ -282,7 +287,7 @@ class Client(T_Client):
 			del self.socket
 			self.clear()
 	def request(self, method:str, args:List[Any]=[], kwargs:Dict[str, Any]={}, id:Optional[Union[str, int]]=None,
-	auth:Optional[str]=None, path:str="/") -> Any:
+	auth:Optional[str]=None, path:str="/") -> Request:
 		if id is None:
 			id = self.id
 			self.id += 1
@@ -358,7 +363,7 @@ class Request(T_Request):
 	def getDelay(self) -> float:
 		if not self._done:
 			self._get()
-		return self._requestTime - self._responseTime
+		return self._responseTime - self._requestTime
 	def getID(self) -> Any:
 		return self._id
 	def isDone(self) -> bool:
