@@ -9,7 +9,8 @@ import fsPacker
 from . import __version__
 from .utils import Headers, deflate
 from .exceptions import SocketError, MessageError
-from .abcs import T_Socket, T_Client, T_BaseClientSocket, T_HTTPClientSocket, T_StringClientSocket, T_FSPackerClientSocket
+from .abcs import (T_Socket, T_Client, T_BaseClientSocket, T_HTTPClientSocket, T_StringClientSocket, T_FSPackerClientSocket,
+SSLContext)
 # Program
 NOT_CONNECTED = 0
 CONNECTING    = 1
@@ -82,9 +83,8 @@ class BaseClientSocket(T_BaseClientSocket):
 						"PSK-AES256-CBC-SHA"
 					])
 				)
-				self.sock = cast(
-					T_Socket,
-					sslCtx.wrap_socket(self.sock, False, False, server_hostname=self.sslHostname or self.target[0])
+				self.sock = cast(SSLContext, sslCtx).wrap_socket(
+					self.sock, False, False, server_hostname=self.sslHostname or self.target[0]
 				)
 				self.log.debug("Doing SSL handshake..")
 			self.connectionStatus = CONNECTING
@@ -308,9 +308,9 @@ class HTTPClientSocket(BaseClientSocket, T_HTTPClientSocket):
 			if len(httpResponse) < 2:
 				self._raiseMessageError("Invalid HTTP response")
 			if httpResponse[1] == "503":
-				self._raiseMessageError("Server offline")
+				self._raiseSocketError("Server offline")
 			elif httpResponse[1] != "200":
-				self._raiseMessageError("Request failure")
+				self._raiseSocketError("Request failure")
 			#
 			headers = Headers()
 			for rawHeader in rawHeaders:

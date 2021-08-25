@@ -1,4 +1,4 @@
-__version__ = "0.0.2"
+__version__ = "0.0.3"
 __doc__ = """
 Python client for Fusion Explorer API v{}
 Copyright (C) 2021 Fusion Solutions KFT <contact@fusionsolutions.io>
@@ -16,6 +16,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU Lesser General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/lgpl.txt>.
 """.format(__version__)
-from .client import Client
+from .client import Client, Request
 from .exceptions import BaseRPCError, InitializationError, SocketError, MessageError, RequestError, ResponseError
-__all__ = ( "Client", "BaseRPCError", "InitializationError", "SocketError", "MessageError", "RequestError", "ResponseError" )
+__all__ = ("Client", "Request", "BaseRPCError", "InitializationError", "SocketError", "MessageError", "RequestError",
+"ResponseError")

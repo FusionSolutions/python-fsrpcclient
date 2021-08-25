@@ -27,6 +27,7 @@ class ClientTest(unittest.TestCase):
 		self.assertEqual(r.isDone(), False)
 		self.assertEqual(r.isSuccess(), True)
 		self.assertEqual(r.isDone(), True)
+		self.assertGreater(r.getDelay(), 0)
 		self.assertRegex(r.get(), r"0x[0-9a-zA-Z]")
 		with rootClient as c:
 			r = c.request("ping")
