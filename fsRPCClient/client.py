@@ -1,7 +1,8 @@
 # Builtin modules
 from __future__ import annotations
-import json, weakref
+import json, weakref, pickle
 from time import monotonic
+from lz4.frame import decompress # type: ignore
 from typing import Any, Union, List, Dict, Tuple, Optional, Callable, cast
 # Third party modules
 import fsPacker
@@ -10,7 +11,7 @@ from fsSignal import HardSignal, T_Signal, KillSignal
 # Local modules
 from .exceptions import InitializationError, MessageError, RequestError, ResponseError, SocketError
 from .utils import iterSplit, Headers
-from .clientSocket import HTTPClientSocket, StringClientSocket, FSPackerClientSocket
+from .clientSocket import HTTPClientSocket, StringClientSocket, FSPackerClientSocket, OldFSProtocolClientSocket
 from .abcs import T_Request, T_Client
 # Program
 _dumpRequest:Callable[[T_Request], Any] = lambda x: x._dumps()
@@ -63,10 +64,14 @@ class Client(T_Client):
 				raise InitializationError("Target must be address, port, flow info and scope id in a list\tuple")
 		else:
 			raise InitializationError("Unsupported socket protocol")
-		if self.messageProtocol not in ["HTTP", "STR", "FSP"]:
+		if self.messageProtocol not in ["HTTP", "STR", "FSP", "OldFSProtocol"]:
 			raise InitializationError("Unsupported message protocol")
-		if self.requestProtocol not in ["JSONRPC-2", "JSONRPC-P", "FSP"]:
+		if self.requestProtocol not in ["JSONRPC-2", "JSONRPC-P", "FSP", "OldFSProtocol"]:
 			raise InitializationError("Unsupported request protocol")
+		if self.messageProtocol == "OldFSProtocol":
+			if self.requestProtocol != "OldFSProtocol":
+				raise InitializationError("Unsupported request protocol")
+			self.useBulkRequest = False
 		if self.log.isFiltered("TRACE"):
 			self.log.debug(
 				"Protocol initialized  [sockProt: {}][msgProt: {}][reqProt: {}][target: {}][SSL: {}]",
@@ -151,6 +156,12 @@ class Client(T_Client):
 			else:
 				raise RuntimeError
 			self.socket.send(payload)
+		elif isinstance(self.socket, OldFSProtocolClientSocket):
+			if self.requestProtocol == "OldFSProtocol":
+				payload = pickle.dumps(data)
+			else:
+				raise RuntimeError
+			self.socket.send(payload)
 		elif isinstance(self.socket, StringClientSocket):
 			if self.requestProtocol in ["JSONRPC-2", "JSONRPC-P"]:
 				payload = json.dumps(data).encode('utf8')
@@ -187,6 +198,16 @@ class Client(T_Client):
 				)
 			elif self.messageProtocol == "FSP":
 				self.socket = FSPackerClientSocket(
+					client            = self,
+					protocol          = self.socketProtocol,
+					target            = self.target,
+					connectionTimeout = self.connectionTimeout,
+					transferTimeout   = self.transferTimeout,
+					ssl               = False,
+					sslHostname       = None,
+				)
+			elif self.messageProtocol == "OldFSProtocol":
+				self.socket = OldFSProtocolClientSocket(
 					client            = self,
 					protocol          = self.socketProtocol,
 					target            = self.target,
@@ -268,6 +289,18 @@ class Client(T_Client):
 					self._parseResult(*chunk)
 				else:
 					raise MessageError("Invalid payload")
+		elif self.requestProtocol == "OldFSProtocol":
+			if self.messageProtocol == "STR":
+				payload = bytes.fromhex(payload.decode(charset))
+			resp = pickle.loads(payload)
+			if isinstance(resp, tuple) and len(resp) == 3 and \
+			isinstance(resp[0], (int, str)) and \
+			isinstance(resp[1], bool) and \
+			isinstance(resp[2], bytes):
+				self._parseResult(resp[0], resp[1], pickle.loads(decompress(resp[2])), "")
+			else:
+				raise MessageError("Invalid payload")
+			
 	def _parseResult(self, id:Union[int, str], isSuccess:bool, result:Any, uid:str) -> None:
 		if id not in self.requests:
 			self.log.warn("Got unexpected result id: {}", id)
@@ -356,6 +389,8 @@ class Request(T_Request):
 				}
 			elif self._client.requestProtocol == "FSP":
 				return (self._id, self._method, self._args, self._kwargs, self._auth)
+			elif self._client.requestProtocol == "OldFSProtocol":
+				return (self._id, self._method, self._args, self._kwargs)
 	def get(self) -> Any:
 		if not self._done:
 			self._get()

@@ -3,6 +3,7 @@ import re, ssl, traceback, socket, errno, codecs
 from time import monotonic
 from typing import Tuple, Dict, Union, Callable, NoReturn, Optional, cast
 from selectors import DefaultSelector, EVENT_READ, EVENT_WRITE
+from math import ceil
 # Third party modules
 import fsPacker
 # Local modules
@@ -434,4 +435,39 @@ class FSPackerClientSocket(BaseClientSocket, T_FSPackerClientSocket):
 		return False
 	def send(self, payload:bytes) -> None:
 		self._write( fsPacker.packMessage( payload ) )
+		return None
+
+class OldFSProtocolClientSocket(BaseClientSocket, T_FSPackerClientSocket):
+	def _readResponse(self) -> Tuple[int, bytes]:
+		fl = len(self.readBuffer)
+		if not fl:
+			return 0, b""
+		li = self.readBuffer[0]
+		if li == 0:
+			return -1, b""
+		if fl < li:
+			return 0, b""
+		l = int.from_bytes(self.readBuffer[ 1:1+li ], "little")
+		tl = 1+li+l
+		if fl < tl:
+			return 0, b""
+		return tl, self.readBuffer[ 1+li:tl ]
+	def _encodeRequest(self, buffer:bytes) -> bytes:
+		l = len(buffer)
+		li = ceil(l.bit_length() / 8)
+		return li.to_bytes(1, "little") + l.to_bytes(li, "little") + buffer
+	def parseReadBuffer(self) -> bool:
+		while not self.signal.get():
+			if not self.readBuffer:
+				return False
+			messageLength, response = self._readResponse()
+			if messageLength == -1:
+				return True
+			if messageLength == 0:
+				return False
+			self.readBuffer = self.readBuffer[messageLength:]
+			self.client._parseResponse(response)
+		return False
+	def send(self, payload:bytes) -> None:
+		self._write( self._encodeRequest( payload ) )
 		return None
