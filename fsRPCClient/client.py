@@ -81,7 +81,7 @@ class Client(T_Client):
 			self.log.debug("Protocol initialized")
 	def __del__(self) -> None:
 		self.close()
-	def __enter__(self) -> Any:
+	def __enter__(self) -> Client:
 		return self.clone()
 	def __exit__(self, type:Any, value:Any, traceback:Any) -> None:
 		self.close()
@@ -300,7 +300,6 @@ class Client(T_Client):
 				self._parseResult(resp[0], resp[1], pickle.loads(decompress(resp[2])), "")
 			else:
 				raise MessageError("Invalid payload")
-			
 	def _parseResult(self, id:Union[int, str], isSuccess:bool, result:Any, uid:str) -> None:
 		if id not in self.requests:
 			self.log.warn("Got unexpected result id: {}", id)
