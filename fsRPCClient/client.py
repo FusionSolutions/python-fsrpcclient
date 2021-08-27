@@ -81,7 +81,7 @@ class Client(T_Client):
 			self.log.debug("Protocol initialized")
 	def __del__(self) -> None:
 		self.close()
-	def __enter__(self) -> Any:
+	def __enter__(self) -> Client:
 		return self.clone()
 	def __exit__(self, type:Any, value:Any, traceback:Any) -> None:
 		self.close()
