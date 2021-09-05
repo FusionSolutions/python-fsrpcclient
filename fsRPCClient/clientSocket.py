@@ -306,13 +306,12 @@ class HTTPClientSocket(BaseClientSocket, T_HTTPClientSocket):
 			if not rawHeaders:
 				self._raiseMessageError("Invalid HTTP headers")
 			httpResponse = rawHeaders.pop(0).split(" ")
-			if len(httpResponse) < 2:
-				self._raiseMessageError("Invalid HTTP response")
-			if httpResponse[1] == "503":
-				self._raiseSocketError("Server offline")
-			elif httpResponse[1] != "200":
-				self._raiseSocketError("Request failure")
-			#
+			if len(httpResponse) != 3:
+				self._raiseMessageError("Invalid HTTP response code")
+			# if httpResponse[1] == "503":
+			# 	self._raiseSocketError("Server offline")
+			# elif httpResponse[1] != "200":
+			# 	self._raiseSocketError("Request failure")
 			headers = Headers()
 			for rawHeader in rawHeaders:
 				s = rawHeader.find(":")
