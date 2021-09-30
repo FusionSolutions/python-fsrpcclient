@@ -36,8 +36,8 @@ class T_Client(metaclass=ABCMeta):
 	max_bulk_request:int
 	target:Union[str, Tuple[str, int], Tuple[str, int, int, int]]
 	protocol:str
-	connTimeout:int
-	transferTimeout:int
+	connTimeout:float
+	transferTimeout:float
 	retryDelay:float
 	retryCount:int
 	socketErrors:int
