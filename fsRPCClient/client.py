@@ -18,14 +18,15 @@ _dumpRequest:Callable[[T_Request], Any] = lambda x: x._dumps()
 
 class Client(T_Client):
 	max_bulk_request = 0xFF
-	def __init__(self, protocol:str, target:Union[str, Tuple[str, int], Tuple[str, int, int, int]], connectTimeout:int=15,
-	transferTimeout:int=320, retryCount:int=10, retryDelay:Union[int, float]=5, ssl:bool=False, sslHostname:Optional[str]=None,
-	httpHost:Optional[str]=None, extraHttpHeaders:Dict[str, str]={}, disableCompression:bool=False, useBulkRequest:bool=True,
+	def __init__(self, protocol:str, target:Union[str, Tuple[str, int], Tuple[str, int, int, int]],
+	connectTimeout:Union[int, float]=15, transferTimeout:Union[int, float]=320, retryCount:int=10,
+	retryDelay:Union[int, float]=5, ssl:bool=False, sslHostname:Optional[str]=None, httpHost:Optional[str]=None,
+	extraHttpHeaders:Dict[str, str]={}, disableCompression:bool=False, useBulkRequest:bool=True,
 	convertNumbers:Optional[str]=None, log:Optional[Logger]=None, signal:Optional[T_Signal]=None) -> None:
 		self.protocol           = protocol
 		self.target             = target
-		self.connectTimeout     = connectTimeout
-		self.transferTimeout    = transferTimeout
+		self.connectTimeout     = float(connectTimeout)
+		self.transferTimeout    = float(transferTimeout)
 		self.retryCount         = retryCount
 		self.retryDelay         = float(retryDelay)
 		self.ssl                = ssl
@@ -40,6 +41,16 @@ class Client(T_Client):
 		self.id                 = 0
 		self.requests           = weakref.WeakValueDictionary()
 		self.socketErrors       = 0
+		if self.connectTimeout < 0:
+			raise InitializationError("`connectTimeout` must be greater than 0")
+		if self.transferTimeout < 0:
+			raise InitializationError("`transferTimeout` must be greater than 0")
+		if self.retryCount < 0:
+			raise InitializationError("`retryCount` must be positive integer")
+		if self.retryDelay <= 0:
+			raise InitializationError("`retryDelay` must be greater than 0")
+		if self.convertNumbers is not None and self.convertNumbers not in ["default", "none", "hex", "str"]:
+			raise InitializationError("When `convertNumbers` is set, then most be the following one: default, none, hex or str")
 		self._initializeProtocol()
 	def _initializeProtocol(self) -> None:
 		if ":" not in self.protocol:
