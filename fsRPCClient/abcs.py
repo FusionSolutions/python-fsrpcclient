@@ -3,7 +3,8 @@ from __future__ import annotations
 from abc import ABCMeta, abstractmethod
 from selectors import BaseSelector
 from ssl import SSLSession
-from typing import List, Dict, Tuple, Union, Callable, Optional, Any, MutableMapping
+from weakref import WeakValueDictionary
+from typing import List, Dict, Tuple, Union, Callable, Optional, Any
 # Third party modules
 from fsLogger import Logger
 from fsSignal import T_Signal
@@ -37,19 +38,20 @@ class T_Client(metaclass=ABCMeta):
 	protocol:str
 	connTimeout:int
 	transferTimeout:int
+	retryDelay:float
 	retryCount:int
 	socketErrors:int
-	retryDelay:int
 	ssl:bool
 	sslHostname:Optional[str]
 	httpHost:Optional[str]
 	extraHttpHeaders:Dict[str, str]
 	disableCompression:bool
 	useBulkRequest:bool
+	convertNumbers:Optional[str]
 	log:Logger
 	signal:T_Signal
 	id:int
-	requests:MutableMapping[Optional[Union[str, int]], T_Request]
+	requests:WeakValueDictionary[Optional[Union[str, int]], T_Request]
 	socket:Union[T_HTTPClientSocket, T_StringClientSocket, T_FSPackerClientSocket]
 	socketProtocol:str
 	messageProtocol:str
@@ -109,8 +111,8 @@ class T_Request(metaclass=ABCMeta):
 	_method:str
 	_args:List[Any]
 	_kwargs:Dict[Any, Any]
-	_auth:Optional[str]
 	_path:str
+	_convertNumbers:Optional[str]
 	_requestTime:float
 	_responseTime:float
 	_uid:str

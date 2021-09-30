@@ -19,12 +19,12 @@ CONNECTED     = 2
 
 class BaseClientSocket(T_BaseClientSocket):
 	def __init__(self, client:T_Client, protocol:str, target:Union[str, Tuple[str, int], Tuple[str, int, int, int]],
-	connectionTimeout:Union[int, float], transferTimeout:Union[int, float], ssl:bool, sslHostname:Optional[str]):
+	connectTimeout:Union[int, float], transferTimeout:Union[int, float], ssl:bool, sslHostname:Optional[str]):
 		assert protocol in ["TCPv4", "TCPv6", "IPC"], "Unsupported protocol"
 		self.client            = client
 		self.protocol          = protocol
 		self.target            = target
-		self.connectionTimeout = float(connectionTimeout)
+		self.connectTimeout    = float(connectTimeout)
 		self.transferTimeout   = float(transferTimeout)
 		self.ssl               = ssl
 		self.sslHostname       = sslHostname
@@ -112,7 +112,7 @@ class BaseClientSocket(T_BaseClientSocket):
 		self.sockFD = self.sock.fileno()
 		self.mask = EVENT_READ
 		self.poll.register(self.sockFD, EVENT_READ)
-		self.log.info("Socket created: {}".format(self.sockFD))
+		self.log.info("Socket created [FD:{}]".format(self.sockFD))
 	def _doSSLHandshake(self) -> bool:
 		try:
 			self.sock.do_handshake()
@@ -216,6 +216,7 @@ class BaseClientSocket(T_BaseClientSocket):
 		self.timeoutTimer = 0.0
 		if hasattr(self, "sock"):
 			del self.sock
+		self.sockFD = 0
 		self.mask = EVENT_READ
 		self.sslTimer = 0.0
 	def _setMask(self, newMask:int) -> None:
@@ -230,13 +231,14 @@ class BaseClientSocket(T_BaseClientSocket):
 			self._setMask(EVENT_READ | EVENT_WRITE)
 	def close(self) -> None:
 		if hasattr(self, "sock"):
+			self.log.trace("Closing [FD:{}]", self.sockFD)
 			self.mask = EVENT_READ
-			try: self.poll.unregister(self.sockFD)
-			except: pass
+			# try: self.poll.unregister(self.sockFD)
+			# except: pass
 			try: self.sock.close()
 			except: pass
 			self._reset()
-			self.log.info("Closed")
+			self.log.debug("Closed")
 	def connect(self) -> None:
 		if self.connectionStatus != NOT_CONNECTED:
 			return
@@ -251,7 +253,7 @@ class BaseClientSocket(T_BaseClientSocket):
 	def isAlive(self) -> bool:
 		return not (
 			(self.connectionStatus == NOT_CONNECTED) or
-			(self.connectionStatus == CONNECTING and monotonic()-self.timeoutTimer > self.connectionTimeout) or
+			(self.connectionStatus == CONNECTING and monotonic()-self.timeoutTimer > self.connectTimeout) or
 			(self.connectionStatus == CONNECTED and monotonic()-self.timeoutTimer > self.transferTimeout)
 		)
 	def loop(self, whileFn:Callable[[], bool]) -> None:
@@ -283,9 +285,9 @@ class HTTPClientSocket(BaseClientSocket, T_HTTPClientSocket):
 		"Connection":"Keep-Alive",
 	}
 	def __init__(self, client:T_Client, protocol:str, target:Union[str, Tuple[str, int], Tuple[str, int, int, int]],
-	connectionTimeout:Union[int, float], transferTimeout:Union[int, float], ssl:bool=False, sslHostname:Optional[str]=None,
+	connectTimeout:Union[int, float], transferTimeout:Union[int, float], ssl:bool=False, sslHostname:Optional[str]=None,
 	extraHeaders:Dict[str, str]={}, disableCompression:bool=False) -> None:
-		super().__init__(client, protocol, target, connectionTimeout, transferTimeout, ssl, sslHostname)
+		super().__init__(client, protocol, target, connectTimeout, transferTimeout, ssl, sslHostname)
 		self.headers = Headers(self.defaultHeaders)
 		self.headers.update(extraHeaders)
 		if not disableCompression:
