@@ -9,7 +9,7 @@ pwd = os.path.abspath(os.path.dirname(__file__))
 
 setup(
 	name                          = "python-fsrpcclient",
-	version                       = "0.0.7",
+	version                       = "0.1.0",
 	description                   = "Fusion Solutions RPC client",
 	keywords                      = "json rpc client fusion solutions fusionsolutions",
 	author                        = "Andor `iFA` Rajci - FUSION SOLUTIONS Kft",
@@ -21,7 +21,7 @@ setup(
 	long_description_content_type = "text/markdown",
 	zip_safe                      = False,
 	python_requires               = ">=3.7.0",
-	install_requires              = ["python-fslogger>=0.1.4", "python-fssignal>=0.0.7", "python-fspacker>=0.1.0", "lz4"],
+	install_requires              = ["python-fslogger>=0.1.7", "python-fssignal>=0.0.9", "python-fspacker>=0.1.1", "lz4"],
 	test_suite                    = "fsRPCClient.test",
 	package_data                  = { "":["py.typed"] },
 	classifiers                   = [ # https://pypi.org/pypi?%3Aaction=list_classifiers

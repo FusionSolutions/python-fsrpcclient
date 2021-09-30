@@ -9,7 +9,7 @@ import fsPacker
 from fsLogger import Logger
 from fsSignal import HardSignal, T_Signal, KillSignal
 # Local modules
-from .exceptions import InitializationError, MessageError, RequestError, ResponseError, SocketError
+from .exceptions import InitializationError, MessageError, RequestError, ResponseError, BaseRPCError
 from .utils import iterSplit, Headers
 from .clientSocket import HTTPClientSocket, StringClientSocket, FSPackerClientSocket, OldFSProtocolClientSocket
 from .abcs import T_Request, T_Client
@@ -18,22 +18,23 @@ _dumpRequest:Callable[[T_Request], Any] = lambda x: x._dumps()
 
 class Client(T_Client):
 	max_bulk_request = 0xFF
-	def __init__(self, protocol:str, target:Union[str, Tuple[str, int], Tuple[str, int, int, int]], connectionTimeout:int=15,
-	transferTimeout:int=320, retryCount:int=10, retryDelay:int=5, ssl:bool=False, sslHostname:Optional[str]=None,
+	def __init__(self, protocol:str, target:Union[str, Tuple[str, int], Tuple[str, int, int, int]], connectTimeout:int=15,
+	transferTimeout:int=320, retryCount:int=10, retryDelay:Union[int, float]=5, ssl:bool=False, sslHostname:Optional[str]=None,
 	httpHost:Optional[str]=None, extraHttpHeaders:Dict[str, str]={}, disableCompression:bool=False, useBulkRequest:bool=True,
-	log:Optional[Logger]=None, signal:Optional[T_Signal]=None):
+	convertNumbers:Optional[str]=None, log:Optional[Logger]=None, signal:Optional[T_Signal]=None) -> None:
 		self.protocol           = protocol
 		self.target             = target
-		self.connectionTimeout  = connectionTimeout
+		self.connectTimeout     = connectTimeout
 		self.transferTimeout    = transferTimeout
 		self.retryCount         = retryCount
-		self.retryDelay         = retryDelay
+		self.retryDelay         = float(retryDelay)
 		self.ssl                = ssl
 		self.sslHostname        = sslHostname
 		self.httpHost           = httpHost
 		self.extraHttpHeaders   = extraHttpHeaders
 		self.disableCompression = disableCompression
 		self.useBulkRequest     = useBulkRequest
+		self.convertNumbers     = convertNumbers
 		self.log                = log or Logger("RPCClient")
 		self.signal             = signal or HardSignal
 		self.id                 = 0
@@ -79,17 +80,15 @@ class Client(T_Client):
 			)
 		elif self.log.isFiltered("DEBUG"):
 			self.log.debug("Protocol initialized")
-	def __del__(self) -> None:
-		self.close()
 	def __enter__(self) -> Client:
-		return self.clone()
+		return self
 	def __exit__(self, type:Any, value:Any, traceback:Any) -> None:
 		self.close()
 	def __getstate__(self) -> Dict[str, Any]:
 		return {
 			"target":            self.target,
 			"protocol":          self.protocol,
-			"connectionTimeout": self.connectionTimeout,
+			"connectTimeout":    self.connectTimeout,
 			"transferTimeout":   self.transferTimeout,
 			"retryCount":        self.retryCount,
 			"retryDelay":        self.retryDelay,
@@ -99,13 +98,14 @@ class Client(T_Client):
 			"extraHttpHeaders":  self.extraHttpHeaders,
 			"disableCompression":self.disableCompression,
 			"useBulkRequest":    self.useBulkRequest,
+			"convertNumbers":    self.convertNumbers,
 			"log":               self.log,
 			"signal":            self.signal,
 		}
 	def __setstate__(self, states:Dict[str, Any]) -> None:
 		self.target             = states["target"]
 		self.protocol           = states["protocol"]
-		self.connectionTimeout  = states["connectionTimeout"]
+		self.connectTimeout     = states["connectTimeout"]
 		self.transferTimeout    = states["transferTimeout"]
 		self.retryCount         = states["retryCount"]
 		self.retryDelay         = states["retryDelay"]
@@ -115,6 +115,7 @@ class Client(T_Client):
 		self.extraHttpHeaders   = states["extraHttpHeaders"]
 		self.disableCompression = states["disableCompression"]
 		self.useBulkRequest     = states["useBulkRequest"]
+		self.convertNumbers     = states["convertNumbers    "]
 		self.log                = states["log"]
 		self.signal             = states["signal"]
 		self.id                 = 0
@@ -134,10 +135,10 @@ class Client(T_Client):
 				else:
 					for obj in objs:
 						self._sendRequest(obj._dumps(), path=obj._path)
-	def _sendRequest(self, data:Any, path:str="/") -> None:
+	def _sendRequest(self, data:Any, path:str="/", extraHttpHeaders:Optional[Dict[str, str]]=None) -> None:
 		payload:bytes
 		if isinstance(self.socket, HTTPClientSocket):
-			extraHttpHeaders:Dict[str, str]={}
+			extraHttpHeaders = extraHttpHeaders or {}
 			extraHttpHeaders["host"] = self.httpHost or "{}:{}".format(self.target[0], self.target[1])
 			if self.requestProtocol in ["JSONRPC-2", "JSONRPC-P"]:
 				extraHttpHeaders["Content-Type"] = "application/json;charset=utf-8"
@@ -147,7 +148,7 @@ class Client(T_Client):
 				payload = fsPacker.dumps(data)
 			else:
 				raise RuntimeError
-			self.socket.send(payload, path, extraHttpHeaders)
+			self._sendToSocket(payload, path, extraHttpHeaders)
 		elif isinstance(self.socket, FSPackerClientSocket):
 			if self.requestProtocol in ["JSONRPC-2", "JSONRPC-P"]:
 				payload = json.dumps(data).encode('utf8')
@@ -155,13 +156,13 @@ class Client(T_Client):
 				payload = fsPacker.dumps(data)
 			else:
 				raise RuntimeError
-			self.socket.send(payload)
+			self._sendToSocket(payload)
 		elif isinstance(self.socket, OldFSProtocolClientSocket):
 			if self.requestProtocol == "OldFSProtocol":
 				payload = pickle.dumps(data)
 			else:
 				raise RuntimeError
-			self.socket.send(payload)
+			self._sendToSocket(payload)
 		elif isinstance(self.socket, StringClientSocket):
 			if self.requestProtocol in ["JSONRPC-2", "JSONRPC-P"]:
 				payload = json.dumps(data).encode('utf8')
@@ -169,9 +170,14 @@ class Client(T_Client):
 				payload = fsPacker.dumps(data).hex().encode('utf8')
 			else:
 				raise RuntimeError
-			self.socket.send(payload)
+			self._sendToSocket(payload)
 		else:
 			raise RuntimeError
+	def _sendToSocket(self, payload:bytes, path:str="/", extraHttpHeaders:Dict[str, str]={}) -> None:
+		if isinstance(self.socket, HTTPClientSocket):
+			self.socket.send(payload, path, extraHttpHeaders)
+		else:
+			self.socket.send(payload)
 	def _createSocket(self) -> None:
 		if not hasattr(self, "socket"):
 			if self.messageProtocol == "HTTP":
@@ -179,7 +185,7 @@ class Client(T_Client):
 					client             = self,
 					protocol           = self.socketProtocol,
 					target             = self.target,
-					connectionTimeout  = self.connectionTimeout,
+					connectTimeout     = self.connectTimeout,
 					transferTimeout    = self.transferTimeout,
 					ssl                = self.ssl,
 					sslHostname        = self.sslHostname,
@@ -188,33 +194,33 @@ class Client(T_Client):
 				)
 			elif self.messageProtocol == "STR":
 				self.socket = StringClientSocket(
-					client            = self,
-					protocol          = self.socketProtocol,
-					target            = self.target,
-					connectionTimeout = self.connectionTimeout,
-					transferTimeout   = self.transferTimeout,
-					ssl               = False,
-					sslHostname       = None,
+					client          = self,
+					protocol        = self.socketProtocol,
+					target          = self.target,
+					connectTimeout  = self.connectTimeout,
+					transferTimeout = self.transferTimeout,
+					ssl             = False,
+					sslHostname     = None,
 				)
 			elif self.messageProtocol == "FSP":
 				self.socket = FSPackerClientSocket(
-					client            = self,
-					protocol          = self.socketProtocol,
-					target            = self.target,
-					connectionTimeout = self.connectionTimeout,
-					transferTimeout   = self.transferTimeout,
-					ssl               = False,
-					sslHostname       = None,
+					client          = self,
+					protocol        = self.socketProtocol,
+					target          = self.target,
+					connectTimeout  = self.connectTimeout,
+					transferTimeout = self.transferTimeout,
+					ssl             = False,
+					sslHostname     = None,
 				)
 			elif self.messageProtocol == "OldFSProtocol":
 				self.socket = OldFSProtocolClientSocket(
-					client            = self,
-					protocol          = self.socketProtocol,
-					target            = self.target,
-					connectionTimeout = self.connectionTimeout,
-					transferTimeout   = self.transferTimeout,
-					ssl               = False,
-					sslHostname       = None,
+					client          = self,
+					protocol        = self.socketProtocol,
+					target          = self.target,
+					connectTimeout  = self.connectTimeout,
+					transferTimeout = self.transferTimeout,
+					ssl             = False,
+					sslHostname     = None,
 				)
 			else:
 				raise RuntimeError
@@ -223,7 +229,7 @@ class Client(T_Client):
 			return not self.requests[id].isDone()
 		if id not in self.requests:
 			raise ResponseError("Unknown request ID: {}".format(id))
-		self.socketErrors = self.retryCount
+		self.socketErrors = 0
 		while True:
 			try:
 				self.signal.check()
@@ -236,13 +242,14 @@ class Client(T_Client):
 				break
 			except KillSignal:
 				raise
-			except SocketError:
-				self.log.warn("Error while getting response")
-				if self.socketErrors > 0:
-					if self.socketErrors != self.retryCount:
-						self.signal.sleep(self.retryDelay)
-					self.socketErrors -= 1
+			except BaseRPCError:
+				if hasattr(self, "socket"):
 					del self.socket
+				if self.socketErrors < self.retryCount:
+					if self.socketErrors > 0:
+						self.log.warn("Error while getting response [{} left]", self.retryCount-self.socketErrors)
+						self.signal.sleep(self.retryDelay)
+					self.socketErrors += 1
 					continue
 				raise
 	def _parseResponse(self, payload:bytes, headers:Optional[Headers]=None, charset:str="utf8") -> None:
@@ -300,7 +307,6 @@ class Client(T_Client):
 				self._parseResult(resp[0], resp[1], pickle.loads(decompress(resp[2])), "")
 			else:
 				raise MessageError("Invalid payload")
-			
 	def _parseResult(self, id:Union[int, str], isSuccess:bool, result:Any, uid:str) -> None:
 		if id not in self.requests:
 			self.log.warn("Got unexpected result id: {}", id)
@@ -318,9 +324,10 @@ class Client(T_Client):
 		if hasattr(self, "socket"):
 			self.socket.close()
 			del self.socket
-			self.clear()
+		self.clear()
+		self.log.debug("Closed")
 	def request(self, method:str, args:List[Any]=[], kwargs:Dict[str, Any]={}, id:Optional[Union[str, int]]=None,
-	auth:Optional[str]=None, path:str="/") -> Request:
+	path:str="/") -> Request:
 		if id is None:
 			id = self.id
 			self.id += 1
@@ -334,8 +341,8 @@ class Client(T_Client):
 			method,
 			args,
 			kwargs,
-			auth,
 			path,
+			self.convertNumbers,
 		)
 		self.requests[id] = obj
 		self.log.info("Request queued: {} [{}]".format(method, id))
@@ -344,23 +351,24 @@ class Client(T_Client):
 		return obj
 
 class Request(T_Request):
-	__slots__ = ("_client", "_id", "_method", "_args", "_kwargs", "_auth", "_requestTime", "_responseTime", "_uid", "_done",
-	"_success", "_response")
-	def __init__(self, client:T_Client, id:Any, method:str, args:List[Any], kwargs:Dict[str, Any], auth:Optional[str]=None,
-	path:str="/"):
-		self._client = client
-		self._id = id
-		self._method = method
-		self._args = args
-		self._kwargs = kwargs
-		self._auth = auth
-		self._path = path
-		self._requestTime = monotonic()
+	__slots__ = ("_client", "_id", "_method", "_args", "_kwargs", "_path", "_convertNumbers", "_requestTime", "_responseTime",
+	"_uid", "_done", "_success", "_response")
+	def __init__(self, client:T_Client, id:Any, method:str, args:List[Any], kwargs:Dict[str, Any], path:str="/",
+	convertNumbers:Optional[str]=None) -> None:
+		self._client         = client
+		self._id             = id
+		self._method         = method
+		self._args           = args
+		self._kwargs         = kwargs
+		self._path           = path
+		self._convertNumbers = convertNumbers
+		#
+		self._requestTime  = monotonic()
 		self._responseTime = 0.0
-		self._uid = ""
-		self._done = False
-		self._success = False
-		self._response = None
+		self._uid          = ""
+		self._done         = False
+		self._success      = False
+		self._response     = None
 	def _get(self) -> None:
 		self._client._get(self._id)
 		return None
@@ -372,25 +380,34 @@ class Request(T_Request):
 		self._response = result
 	def _dumps(self) -> Any:
 		if self._method:
+			r:Any
 			if self._client.requestProtocol == "JSONRPC-2":
-				return {
+				r = {
 					"jsonrpc":"2.0",
 					"params":self._kwargs or self._args,
 					"method":self._method,
 					"id":self._id,
 				}
+				if self._convertNumbers is not None:
+					r["convertNumbers"] = self._convertNumbers
 			elif self._client.requestProtocol == "JSONRPC-P":
-				return {
+				r = {
 					"jsonrpc":"python",
 					"args":self._args,
 					"kwargs":self._kwargs,
 					"method":self._method,
 					"id":self._id,
 				}
+				if self._convertNumbers is not None:
+					r["convertNumbers"] = self._convertNumbers
 			elif self._client.requestProtocol == "FSP":
-				return (self._id, self._method, self._args, self._kwargs, self._auth)
+				r = (self._id, self._method, self._args, self._kwargs)
 			elif self._client.requestProtocol == "OldFSProtocol":
-				return (self._id, self._method, self._args, self._kwargs)
+				r = (self._id, self._method, self._args, self._kwargs)
+			else:
+				raise RuntimeError
+			return r
+		return None
 	def get(self) -> Any:
 		if not self._done:
 			self._get()
