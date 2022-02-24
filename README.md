@@ -7,7 +7,7 @@ Python RPC client for JSONRPC and FSP protocol through TCP (IPv4 and IPv6) and I
 
 ## Installation
 
-Requires python version 3.7 or later.
+Requires python version 3.8 or later.
 
 To install the latest release on [PyPI](https://pypi.org/project/python-fsrpcclient/),
 simply run:

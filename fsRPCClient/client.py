@@ -1,28 +1,31 @@
 # Builtin modules
 from __future__ import annotations
 import json, weakref, pickle
-from time import monotonic
 from lz4.frame import decompress # type: ignore
 from typing import Any, Union, List, Dict, Tuple, Optional, Callable, cast
 # Third party modules
 import fsPacker
-from fsLogger import Logger
-from fsSignal import HardSignal, T_Signal, KillSignal
+from fsLogger import Logger, T_Logger
+from fsSignal import HardSignal, KillSignal, T_Signal
 # Local modules
 from .exceptions import InitializationError, MessageError, RequestError, ResponseError, BaseRPCError
-from .utils import iterSplit, Headers
+from .utils import iterSplit
 from .clientSocket import HTTPClientSocket, StringClientSocket, FSPackerClientSocket, OldFSProtocolClientSocket
-from .abcs import T_Request, T_Client
+from .abcs import (T_Request, T_Client, T_Headers, T_HTTPClientSocket, T_BaseClientSocket_send_default, T_SocketBindAddress,
+T_BaseClientSocket_send_http, T_StringClientSocket, T_FSPackerClientSocket, T_OldFSPackerClientSocket)
+from .requestObj import Request
 # Program
 _dumpRequest:Callable[[T_Request], Any] = lambda x: x._dumps()
 
 class Client(T_Client):
-	max_bulk_request = 0xFF
+	max_bulk_request:int = 0xFF
+	FSPACKER_VERSION:int = fsPacker.HIGHEST_VERSION
 	def __init__(self, protocol:str, target:Union[str, Tuple[str, int], Tuple[str, int, int, int]],
 	connectTimeout:Union[int, float]=15, transferTimeout:Union[int, float]=320, retryCount:int=10,
 	retryDelay:Union[int, float]=5, ssl:bool=False, sslHostname:Optional[str]=None, httpHost:Optional[str]=None,
 	extraHttpHeaders:Dict[str, str]={}, disableCompression:bool=False, useBulkRequest:bool=True,
-	convertNumbers:Optional[str]=None, log:Optional[Logger]=None, signal:Optional[T_Signal]=None) -> None:
+	convertNumbers:Optional[str]=None, bind:Optional[T_SocketBindAddress]=None, log:Optional[T_Logger]=None,
+	signal:Optional[T_Signal]=None) -> None:
 		self.protocol           = protocol
 		self.target             = target
 		self.connectTimeout     = float(connectTimeout)
@@ -36,8 +39,9 @@ class Client(T_Client):
 		self.disableCompression = disableCompression
 		self.useBulkRequest     = useBulkRequest
 		self.convertNumbers     = convertNumbers
+		self.bind               = bind
 		self.log                = log or Logger("RPCClient")
-		self.signal             = signal or HardSignal
+		self.signal             = signal or HardSignal()
 		self.id                 = 0
 		self.requests           = weakref.WeakValueDictionary()
 		self.socketErrors       = 0
@@ -47,8 +51,8 @@ class Client(T_Client):
 			raise InitializationError("`transferTimeout` must be greater than 0")
 		if self.retryCount < 0:
 			raise InitializationError("`retryCount` must be positive integer")
-		if self.retryDelay <= 0:
-			raise InitializationError("`retryDelay` must be greater than 0")
+		if self.retryDelay < 0:
+			raise InitializationError("`retryDelay` must be greater or equal than 0")
 		if self.convertNumbers is not None and self.convertNumbers not in ["default", "none", "hex", "str"]:
 			raise InitializationError("When `convertNumbers` is set, then most be the following one: default, none, hex or str")
 		self._initializeProtocol()
@@ -91,7 +95,7 @@ class Client(T_Client):
 			)
 		elif self.log.isFiltered("DEBUG"):
 			self.log.debug("Protocol initialized")
-	def __enter__(self) -> Client:
+	def __enter__(self) -> T_Client:
 		return self
 	def __exit__(self, type:Any, value:Any, traceback:Any) -> None:
 		self.close()
@@ -110,6 +114,7 @@ class Client(T_Client):
 			"disableCompression":self.disableCompression,
 			"useBulkRequest":    self.useBulkRequest,
 			"convertNumbers":    self.convertNumbers,
+			"bind":              self.bind,
 			"log":               self.log,
 			"signal":            self.signal,
 		}
@@ -126,7 +131,8 @@ class Client(T_Client):
 		self.extraHttpHeaders   = states["extraHttpHeaders"]
 		self.disableCompression = states["disableCompression"]
 		self.useBulkRequest     = states["useBulkRequest"]
-		self.convertNumbers     = states["convertNumbers    "]
+		self.convertNumbers     = states["convertNumbers"]
+		self.bind               = states["bind"]
 		self.log                = states["log"]
 		self.signal             = states["signal"]
 		self.id                 = 0
@@ -148,7 +154,7 @@ class Client(T_Client):
 						self._sendRequest(obj._dumps(), path=obj._path)
 	def _sendRequest(self, data:Any, path:str="/", extraHttpHeaders:Optional[Dict[str, str]]=None) -> None:
 		payload:bytes
-		if isinstance(self.socket, HTTPClientSocket):
+		if isinstance(self.socket, T_HTTPClientSocket):
 			extraHttpHeaders = extraHttpHeaders or {}
 			extraHttpHeaders["host"] = self.httpHost or "{}:{}".format(self.target[0], self.target[1])
 			if self.requestProtocol in ["JSONRPC-2", "JSONRPC-P"]:
@@ -156,39 +162,41 @@ class Client(T_Client):
 				payload = json.dumps(data).encode('utf8')
 			elif self.requestProtocol == "FSP":
 				extraHttpHeaders["Content-Type"] = "application/fspacker"
-				payload = fsPacker.dumps(data)
+				payload = fsPacker.dumps(data, version=self.FSPACKER_VERSION)
 			else:
 				raise RuntimeError
 			self._sendToSocket(payload, path, extraHttpHeaders)
-		elif isinstance(self.socket, FSPackerClientSocket):
+		elif isinstance(self.socket, T_FSPackerClientSocket):
 			if self.requestProtocol in ["JSONRPC-2", "JSONRPC-P"]:
 				payload = json.dumps(data).encode('utf8')
 			elif self.requestProtocol == "FSP":
-				payload = fsPacker.dumps(data)
+				payload = fsPacker.dumps(data, version=self.FSPACKER_VERSION)
 			else:
 				raise RuntimeError
 			self._sendToSocket(payload)
-		elif isinstance(self.socket, OldFSProtocolClientSocket):
+		elif isinstance(self.socket, T_OldFSPackerClientSocket):
 			if self.requestProtocol == "OldFSProtocol":
 				payload = pickle.dumps(data)
 			else:
 				raise RuntimeError
 			self._sendToSocket(payload)
-		elif isinstance(self.socket, StringClientSocket):
+		elif isinstance(self.socket, T_StringClientSocket):
 			if self.requestProtocol in ["JSONRPC-2", "JSONRPC-P"]:
 				payload = json.dumps(data).encode('utf8')
 			elif self.requestProtocol == "FSP":
-				payload = fsPacker.dumps(data).hex().encode('utf8')
+				payload = fsPacker.dumps(data, version=self.FSPACKER_VERSION).hex().encode('utf8')
 			else:
 				raise RuntimeError
 			self._sendToSocket(payload)
 		else:
 			raise RuntimeError
 	def _sendToSocket(self, payload:bytes, path:str="/", extraHttpHeaders:Dict[str, str]={}) -> None:
-		if isinstance(self.socket, HTTPClientSocket):
+		if isinstance(self.socket, T_BaseClientSocket_send_http):
 			self.socket.send(payload, path, extraHttpHeaders)
-		else:
+		elif isinstance(self.socket, T_BaseClientSocket_send_default):
 			self.socket.send(payload)
+		else:
+			raise RuntimeError
 	def _createSocket(self) -> None:
 		if not hasattr(self, "socket"):
 			if self.messageProtocol == "HTTP":
@@ -196,6 +204,7 @@ class Client(T_Client):
 					client             = self,
 					protocol           = self.socketProtocol,
 					target             = self.target,
+					bind               = self.bind,
 					connectTimeout     = self.connectTimeout,
 					transferTimeout    = self.transferTimeout,
 					ssl                = self.ssl,
@@ -208,6 +217,7 @@ class Client(T_Client):
 					client          = self,
 					protocol        = self.socketProtocol,
 					target          = self.target,
+					bind            = self.bind,
 					connectTimeout  = self.connectTimeout,
 					transferTimeout = self.transferTimeout,
 					ssl             = False,
@@ -218,6 +228,7 @@ class Client(T_Client):
 					client          = self,
 					protocol        = self.socketProtocol,
 					target          = self.target,
+					bind            = self.bind,
 					connectTimeout  = self.connectTimeout,
 					transferTimeout = self.transferTimeout,
 					ssl             = False,
@@ -228,6 +239,7 @@ class Client(T_Client):
 					client          = self,
 					protocol        = self.socketProtocol,
 					target          = self.target,
+					bind            = self.bind,
 					connectTimeout  = self.connectTimeout,
 					transferTimeout = self.transferTimeout,
 					ssl             = False,
@@ -259,11 +271,12 @@ class Client(T_Client):
 				if self.socketErrors < self.retryCount:
 					if self.socketErrors > 0:
 						self.log.warn("Error while getting response [{} left]", self.retryCount-self.socketErrors)
-						self.signal.sleep(self.retryDelay)
+						if self.retryDelay:
+							self.signal.sleep(self.retryDelay)
 					self.socketErrors += 1
 					continue
 				raise
-	def _parseResponse(self, payload:bytes, headers:Optional[Headers]=None, charset:str="utf8") -> None:
+	def _parseResponse(self, payload:bytes, headers:Optional[T_Headers]=None, charset:str="utf8") -> None:
 		if self.requestProtocol in ["JSONRPC-2", "JSONRPC-P"]:
 			try:
 				data = json.loads(payload.decode(charset))
@@ -290,10 +303,12 @@ class Client(T_Client):
 			if self.messageProtocol == "STR":
 				payload = bytes.fromhex(payload.decode(charset))
 			try:
-				data = fsPacker.loads(
+				_, data = fsPacker.loads(
 					payload,
 					maxDictSize=0,
 					maxOPSize=0,
+					maxIndexSize=0,
+					recursiveLimit=512,
 				)
 			except:
 				raise MessageError("Invalid payload")
@@ -327,7 +342,7 @@ class Client(T_Client):
 		obj._parseResponse( id, isSuccess, result, uid )
 	def clear(self) -> None:
 		self.requests.clear()
-	def clone(self, **kwargs:Any) -> Client:
+	def clone(self, **kwargs:Any) -> T_Client:
 		opts = self.__getstate__()
 		opts.update(kwargs)
 		return Client(**opts)
@@ -337,8 +352,9 @@ class Client(T_Client):
 			del self.socket
 		self.clear()
 		self.log.debug("Closed")
+	__del__ = close
 	def request(self, method:str, args:List[Any]=[], kwargs:Dict[str, Any]={}, id:Optional[Union[str, int]]=None,
-	path:str="/") -> Request:
+	path:str="/") -> T_Request:
 		if id is None:
 			id = self.id
 			self.id += 1
@@ -360,82 +376,3 @@ class Client(T_Client):
 		if hasattr(self, "socket"):
 			self._sendRequest( obj._dumps() )
 		return obj
-
-class Request(T_Request):
-	__slots__ = ("_client", "_id", "_method", "_args", "_kwargs", "_path", "_convertNumbers", "_requestTime", "_responseTime",
-	"_uid", "_done", "_success", "_response")
-	def __init__(self, client:T_Client, id:Any, method:str, args:List[Any], kwargs:Dict[str, Any], path:str="/",
-	convertNumbers:Optional[str]=None) -> None:
-		self._client         = client
-		self._id             = id
-		self._method         = method
-		self._args           = args
-		self._kwargs         = kwargs
-		self._path           = path
-		self._convertNumbers = convertNumbers
-		#
-		self._requestTime  = monotonic()
-		self._responseTime = 0.0
-		self._uid          = ""
-		self._done         = False
-		self._success      = False
-		self._response     = None
-	def _get(self) -> None:
-		self._client._get(self._id)
-		return None
-	def _parseResponse(self, id:Union[int, str], isSuccess:bool, result:Any, uid:str) -> None:
-		self._done = True
-		self._responseTime = monotonic()
-		self._uid = uid
-		self._success = isSuccess
-		self._response = result
-	def _dumps(self) -> Any:
-		if self._method:
-			r:Any
-			if self._client.requestProtocol == "JSONRPC-2":
-				r = {
-					"jsonrpc":"2.0",
-					"params":self._kwargs or self._args,
-					"method":self._method,
-					"id":self._id,
-				}
-				if self._convertNumbers is not None:
-					r["convertNumbers"] = self._convertNumbers
-			elif self._client.requestProtocol == "JSONRPC-P":
-				r = {
-					"jsonrpc":"python",
-					"args":self._args,
-					"kwargs":self._kwargs,
-					"method":self._method,
-					"id":self._id,
-				}
-				if self._convertNumbers is not None:
-					r["convertNumbers"] = self._convertNumbers
-			elif self._client.requestProtocol == "FSP":
-				r = (self._id, self._method, self._args, self._kwargs)
-			elif self._client.requestProtocol == "OldFSProtocol":
-				r = (self._id, self._method, self._args, self._kwargs)
-			else:
-				raise RuntimeError
-			return r
-		return None
-	def get(self) -> Any:
-		if not self._done:
-			self._get()
-		return self._response
-	def getDelay(self) -> float:
-		if not self._done:
-			self._get()
-		return self._responseTime - self._requestTime
-	def getID(self) -> Any:
-		return self._id
-	def isDone(self) -> bool:
-		return self._done
-	def getUID(self) -> str:
-		if not self._done:
-			self._get()
-		return self._uid
-	def isSuccess(self) -> bool:
-		if not self._done:
-			self._get()
-		return self._success

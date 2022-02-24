@@ -11,7 +11,7 @@ from . import __version__
 from .utils import Headers, deflate
 from .exceptions import SocketError, MessageError
 from .abcs import (T_Socket, T_Client, T_BaseClientSocket, T_HTTPClientSocket, T_StringClientSocket, T_FSPackerClientSocket,
-SSLContext)
+T_OldFSPackerClientSocket, SSLContext, T_SocketBindAddress)
 # Program
 NOT_CONNECTED = 0
 CONNECTING    = 1
@@ -19,7 +19,8 @@ CONNECTED     = 2
 
 class BaseClientSocket(T_BaseClientSocket):
 	def __init__(self, client:T_Client, protocol:str, target:Union[str, Tuple[str, int], Tuple[str, int, int, int]],
-	connectTimeout:Union[int, float], transferTimeout:Union[int, float], ssl:bool, sslHostname:Optional[str]):
+	bind:Optional[T_SocketBindAddress], connectTimeout:Union[int, float], transferTimeout:Union[int, float], ssl:bool,
+	sslHostname:Optional[str]) -> None:
 		assert protocol in ["TCPv4", "TCPv6", "IPC"], "Unsupported protocol"
 		self.client            = client
 		self.protocol          = protocol
@@ -28,9 +29,11 @@ class BaseClientSocket(T_BaseClientSocket):
 		self.transferTimeout   = float(transferTimeout)
 		self.ssl               = ssl
 		self.sslHostname       = sslHostname
+		self.bind              = bind
 		self.log               = self.client.log.getChild("socket")
 		self.signal            = self.client.signal
 		self.poll              = DefaultSelector()
+		self.sockFD            = None
 		self._reset()
 		self.log.debug("Initialized")
 	def _connect(self, initial:bool=False) -> bool:
@@ -43,7 +46,7 @@ class BaseClientSocket(T_BaseClientSocket):
 			elif self.protocol == "IPC":
 				self.log.info("Connecting to {} ..".format(self.target))
 		cerr = self.sock.connect_ex(self.target)
-		if cerr in [errno.EAGAIN, errno.EINPROGRESS]:
+		if cerr in [errno.EAGAIN, errno.EINPROGRESS]: # errno.ENETUNREACH, errno.EADDRNOTAVAIL
 			return False
 		elif cerr in [0, errno.EISCONN]:
 			if self.ssl:
@@ -108,10 +111,31 @@ class BaseClientSocket(T_BaseClientSocket):
 				"IPC":socket.AF_UNIX,
 			}[self.protocol]
 		))
+		self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 		self.sock.setblocking(False)
-		self.sockFD = self.sock.fileno()
+		if self.bind is not None:
+			try:
+				self.sock.bind(self.bind)
+			except OSError as err:
+				if err.errno == errno.EADDRINUSE:
+					self.log.warn("Bind address {} already in use, switch to automatic", self.bind)
+					# elif err.errno == errno.EADDRNOTAVAIL:
+					# 	self.log.warn("Bind address {} not available, switch to automatic", self.bind)
+				else:
+					self._raiseSocketError("Error during binding socket to {}: {}".format(self.bind, err))
+				self.bind = None
+				self._reset()
+				return self._createSocket()
+		newSockFD = self.sock.fileno()
+		if self.sockFD and self.sockFD != newSockFD:
+			self.poll.unregister(self.sockFD)
+			self.sockFD = None
+		if self.sockFD and self.sockFD == newSockFD:
+			self.poll.modify(newSockFD, EVENT_READ)
+		else:
+			self.poll.register(newSockFD, EVENT_READ)
+		self.sockFD = newSockFD
 		self.mask = EVENT_READ
-		self.poll.register(self.sockFD, EVENT_READ)
 		self.log.info("Socket created [FD:{}]".format(self.sockFD))
 	def _doSSLHandshake(self) -> bool:
 		try:
@@ -204,6 +228,7 @@ class BaseClientSocket(T_BaseClientSocket):
 			self._setMask(EVENT_READ)
 		return False
 	def _raiseSocketError(self, err:str) -> NoReturn:
+		self._reset()
 		self.log.error(err)
 		raise SocketError(err) from None
 	def _raiseMessageError(self, err:str) -> NoReturn:
@@ -215,12 +240,15 @@ class BaseClientSocket(T_BaseClientSocket):
 		self.connectionStatus = NOT_CONNECTED
 		self.timeoutTimer = 0.0
 		if hasattr(self, "sock"):
+			try: self.sock.shutdown(socket.SHUT_RDWR)
+			except: pass
+			try: self.sock.close()
+			except: pass
 			del self.sock
-		self.sockFD = 0
 		self.mask = EVENT_READ
 		self.sslTimer = 0.0
 	def _setMask(self, newMask:int) -> None:
-		if self.mask != newMask:
+		if self.sockFD and self.mask != newMask:
 			self.mask = newMask
 			self.log.trace("New mask: {}", newMask)
 			self.poll.modify(self.sockFD, newMask)
@@ -233,10 +261,6 @@ class BaseClientSocket(T_BaseClientSocket):
 		if hasattr(self, "sock"):
 			self.log.trace("Closing [FD:{}]", self.sockFD)
 			self.mask = EVENT_READ
-			# try: self.poll.unregister(self.sockFD)
-			# except: pass
-			try: self.sock.close()
-			except: pass
 			self._reset()
 			self.log.debug("Closed")
 	def connect(self) -> None:
@@ -285,9 +309,9 @@ class HTTPClientSocket(BaseClientSocket, T_HTTPClientSocket):
 		"Connection":"Keep-Alive",
 	}
 	def __init__(self, client:T_Client, protocol:str, target:Union[str, Tuple[str, int], Tuple[str, int, int, int]],
-	connectTimeout:Union[int, float], transferTimeout:Union[int, float], ssl:bool=False, sslHostname:Optional[str]=None,
-	extraHeaders:Dict[str, str]={}, disableCompression:bool=False) -> None:
-		super().__init__(client, protocol, target, connectTimeout, transferTimeout, ssl, sslHostname)
+	bind:Optional[T_SocketBindAddress], connectTimeout:Union[int, float], transferTimeout:Union[int, float], ssl:bool=False,
+	sslHostname:Optional[str]=None, extraHeaders:Dict[str, str]={}, disableCompression:bool=False) -> None:
+		super().__init__(client, protocol, target, bind, connectTimeout, transferTimeout, ssl, sslHostname)
 		self.headers = Headers(self.defaultHeaders)
 		self.headers.update(extraHeaders)
 		if not disableCompression:
@@ -422,7 +446,25 @@ class FSPackerClientSocket(BaseClientSocket, T_FSPackerClientSocket):
 			rbl = len(self.readBuffer)
 			if rbl == 0:
 				return False
-			indicatorlength, messageLength = fsPacker.unpackMessage(self.readBuffer)
+			li = self.readBuffer[0]
+			indicatorlength = 0
+			messageLength = 0
+			if li < 0xFD:
+				indicatorlength = 1
+				messageLength = li
+			elif li == 0xFD:
+				if rbl > 3:
+					indicatorlength = 3
+					messageLength = int.from_bytes(self.readBuffer[1:3], "little")
+			elif li == 0xFE:
+				if rbl > 4:
+					indicatorlength = 4
+					messageLength = int.from_bytes(self.readBuffer[1:4], "little")
+			elif li == 0xFF:
+				if rbl > 5:
+					indicatorlength = 5
+					messageLength = int.from_bytes(self.readBuffer[1:5], "little")
+			
 			if indicatorlength == 0:
 				self._raiseMessageError("Got invalid response")
 			if rbl < indicatorlength:
@@ -435,10 +477,21 @@ class FSPackerClientSocket(BaseClientSocket, T_FSPackerClientSocket):
 			self.client._parseResponse(response)
 		return False
 	def send(self, payload:bytes) -> None:
-		self._write( fsPacker.packMessage( payload ) )
+		responseLength = len(payload)
+		if responseLength < 0xFD:
+			content = responseLength.to_bytes(1, "little") + payload
+		elif responseLength <= 0xFFFF:
+			content = b"\xFD" + responseLength.to_bytes(2, "little") + payload
+		elif responseLength <= 0xFFFFFF:
+			content = b"\xFE" + responseLength.to_bytes(3, "little") + payload
+		elif responseLength <= 0xFFFFFFFF:
+			content = b"\xFF" + responseLength.to_bytes(4, "little") + payload
+		else:
+			raise fsPacker.PackingError("Too big data to pack")
+		self._write(content)
 		return None
 
-class OldFSProtocolClientSocket(BaseClientSocket, T_FSPackerClientSocket):
+class OldFSProtocolClientSocket(BaseClientSocket, T_OldFSPackerClientSocket):
 	def _readResponse(self) -> Tuple[int, bytes]:
 		fl = len(self.readBuffer)
 		if not fl:

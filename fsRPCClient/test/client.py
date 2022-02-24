@@ -22,7 +22,7 @@ class ClientTest(unittest.TestCase):
 			ssl=True,
 			disableCompression=True,
 			log=Logger("Client"),
-			signal=SoftSignal
+			signal=SoftSignal()
 		)
 		r = rootClient.request("ping")
 		self.assertEqual(r.isDone(), False)
@@ -66,7 +66,7 @@ class ClientTest(unittest.TestCase):
 			ssl=True,
 			disableCompression=True,
 			log=Logger("Client"),
-			signal=SoftSignal,
+			signal=SoftSignal(),
 		)
 		r = rootClient.request("ping")
 		self.assertEqual(r.isSuccess(), True)
@@ -79,7 +79,7 @@ class ClientTest(unittest.TestCase):
 			ssl=True,
 			disableCompression=True,
 			log=Logger("Client"),
-			signal=SoftSignal,
+			signal=SoftSignal(),
 		)
 		r = rootClient.request("ping")
 		self.assertEqual(r.isSuccess(), True)
@@ -91,7 +91,7 @@ class ClientTest(unittest.TestCase):
 			ssl=True,
 			disableCompression=True,
 			log=Logger("Client"),
-			signal=SoftSignal,
+			signal=SoftSignal(),
 			convertNumbers="default",
 		)
 		r = rootClient.request("ping")
@@ -105,7 +105,7 @@ class ClientTest(unittest.TestCase):
 			ssl=True,
 			disableCompression=True,
 			log=Logger("Client"),
-			signal=SoftSignal,
+			signal=SoftSignal(),
 			convertNumbers="default",
 		)
 		r = rootClient.request("ping")
@@ -118,7 +118,7 @@ class ClientTest(unittest.TestCase):
 			ssl=True,
 			disableCompression=True,
 			log=Logger("Client"),
-			signal=SoftSignal,
+			signal=SoftSignal(),
 			convertNumbers="none",
 		)
 		r = rootClient.request("ping")
@@ -131,7 +131,7 @@ class ClientTest(unittest.TestCase):
 			ssl=True,
 			disableCompression=True,
 			log=Logger("Client"),
-			signal=SoftSignal,
+			signal=SoftSignal(),
 			convertNumbers="str",
 		)
 		r = rootClient.request("ping")
@@ -145,7 +145,7 @@ class ClientTest(unittest.TestCase):
 			ssl=True,
 			disableCompression=True,
 			log=Logger("Client"),
-			signal=SoftSignal,
+			signal=SoftSignal(),
 			convertNumbers="hex",
 		)
 		r = rootClient.request("ping")
@@ -161,7 +161,7 @@ class ClientTest(unittest.TestCase):
 			retryCount=2,
 			retryDelay=1,
 			log=Logger("Client"),
-			signal=SoftSignal
+			signal=SoftSignal()
 		)
 		s = monotonic()
 		r = rootClient.request("ping")
