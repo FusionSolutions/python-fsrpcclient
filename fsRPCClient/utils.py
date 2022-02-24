@@ -3,10 +3,11 @@ from __future__ import annotations
 import zlib
 from typing import Dict, Any, List, Tuple, Iterator, Iterable, Optional, Generator, cast
 # Local modules
+from .abcs import T_Headers
 # Program
-class Headers:
+class Headers(T_Headers):
 	def __init__(self, initial:Dict[str, str]={}):
-		self.data:Dict[str, str] = {}
+		self.data = {}
 		for k, v in initial.items():
 			self[k.lower()] = v
 	def __setitem__(self, k:str, v:str) -> None:
@@ -14,12 +15,13 @@ class Headers:
 		return None
 	def __getitem__(self, k:str) -> str:
 		return self.data[k.lower()]
-	def __contains__(self, k:str) -> bool:
-		return k.lower() in self.data
 	def __delitem__(self, k:str) -> None:
 		del self.data[k.lower()]
 	def __iter__(self) -> Iterator[str]:
 		return self.data.__iter__()
+	def has_key(self, k:str) -> bool:
+		return k.lower() in self.data
+	__contains__ = has_key
 	def keys(self) -> Iterable[str]:
 		return self.data.keys()
 	def values(self) -> Iterable[str]:
@@ -42,7 +44,6 @@ class Headers:
 		for k, v in extend.items():
 			h.append("{}: {}".format(k.lower(), v))
 		return "\r\n".join(h)
-	has_key = __contains__
 
 class deflate:
 	@staticmethod

@@ -1,4 +1,4 @@
-python-fslogger>=0.1.7
-python-fssignal>=0.0.9
-python-fspacker>=0.1.1
+python-fslogger~=0.2.0
+python-fssignal~=0.1.0
+python-fspacker~=0.2.0
 lz4
