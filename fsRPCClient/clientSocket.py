@@ -315,7 +315,7 @@ class HTTPClientSocket(BaseClientSocket, T_HTTPClientSocket):
 		self.headers = Headers(self.defaultHeaders)
 		self.headers.update(extraHeaders)
 		if not disableCompression:
-			self.headers.update({"Accept-Encoding":"deflate"})
+			self.headers.update({"accept-encoding":"deflate"})
 		return None
 	def parseReadBuffer(self) -> bool:
 		endLine = b"\r\n"
@@ -326,7 +326,7 @@ class HTTPClientSocket(BaseClientSocket, T_HTTPClientSocket):
 		elif pos > 4096:
 			self._raiseMessageError("HTTP headers are too long")
 		endLineLen = len(endLine)
-		while pos != -1:
+		while not self.signal.get() and pos != -1:
 			rawData = self.readBuffer[pos+endLineLen*2:]
 			rawHeaders = self.readBuffer[:pos].decode("ISO-8859-1").split(endLine.decode("ISO-8859-1"))
 			if not rawHeaders:
@@ -375,33 +375,44 @@ class HTTPClientSocket(BaseClientSocket, T_HTTPClientSocket):
 			#
 			payload = b""
 			if cLength is None:
-				# Chunked: data_size:int + endline:bytes + data:bytes
+				chunkEndLine = b"\r\n"
 				rawDataCache = rawData
-				EOC = False
-				pos = rawDataCache.find(endLine)
 				cLength = 0
-				while pos != -1:
-					cLength += endLineLen
-					if pos == 0:
-						# end of chunks
-						EOC = True
-						break
-					rawChunk = rawDataCache[:pos]
-					rawDataCache = rawDataCache[pos+endLineLen:]
-					try:
-						chunkLength = int(rawChunk, 16)
-					except:
-						self._raiseMessageError("Invalid HTTP chunk length")
-					if chunkLength > 0xFFFFFF:
-						self._raiseMessageError("HTTP chunk too big")
-					if chunkLength > len(rawDataCache):
+				chunkLength = 0
+				while not self.signal.get():
+					cpos = rawDataCache.find(chunkEndLine)
+					if cpos == -1:
+						# if chunkLength == 0:
+						# 	break
 						return False
-					payload += rawDataCache[:chunkLength]
-					cLength += chunkLength
-					rawDataCache = rawDataCache[chunkLength:]
-					pos = rawDataCache.find(endLine)
-				if not EOC:
-					return False
+					cLength += 2
+					if chunkLength == 0:
+						# Be kell kernunk a chunk hosszat
+						rawChunk = rawDataCache[:cpos]
+						cLength += cpos+2
+						if len(rawChunk) == 0:
+							break
+						rawDataCache = rawDataCache[cpos+2:]
+						try:
+							chunkLength = int(rawChunk, 16)
+						except:
+							self._raiseMessageError("Invalid HTTP chunk length")
+						cLength += chunkLength
+						if chunkLength == 0:
+							cLength += 2
+							break
+						elif chunkLength > 0xFFFFFF:
+							self._raiseMessageError("HTTP chunk too big")
+						elif chunkLength > len(rawDataCache):
+							return False
+					else:
+						# Adatot olvasunk
+						if cpos > chunkLength:
+							self._raiseMessageError("Invalid HTTP chunk size")
+						# A cpos ig adat van!
+						payload += rawDataCache[:cpos]
+						rawDataCache = rawDataCache[cpos+2:]
+						chunkLength -= cpos
 			else:
 				if len(rawData) < cLength:
 					return False
@@ -419,8 +430,8 @@ class HTTPClientSocket(BaseClientSocket, T_HTTPClientSocket):
 			self.client._parseResponse(payload, headers, charset)
 			pos = self.readBuffer.find(endLine*2)
 		return False
-	def send(self, payload:bytes=b"", path:str="/", headers:Dict[str, str]={}) -> None:
-		rawHeader = "{} {} HTTP/1.1\r\n".format("POST" if payload else "GET", path)
+	def send(self, payload:bytes=b"", httpMethod:str="POST", path:str="/", headers:Dict[str, str]={}) -> None:
+		rawHeader = "{} {} HTTP/1.1\r\n".format(httpMethod, path)
 		if payload:
 			headers["content-length"] = str(len(payload))
 		rawHeader += self.headers.dumps(extend=headers)

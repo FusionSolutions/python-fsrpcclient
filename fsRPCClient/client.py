@@ -8,11 +8,11 @@ import fsPacker
 from fsLogger import Logger, T_Logger
 from fsSignal import HardSignal, KillSignal, T_Signal
 # Local modules
-from .exceptions import InitializationError, MessageError, RequestError, ResponseError, BaseRPCError
+from .exceptions import InitializationError, RequestError, ResponseError, BaseRPCError
 from .utils import iterSplit
 from .clientSocket import HTTPClientSocket, StringClientSocket, FSPackerClientSocket, OldFSProtocolClientSocket
 from .abcs import (T_Request, T_Client, T_Headers, T_HTTPClientSocket, T_BaseClientSocket_send_default, T_SocketBindAddress,
-T_BaseClientSocket_send_http, T_StringClientSocket, T_FSPackerClientSocket, T_OldFSPackerClientSocket)
+T_BaseClientSocket_send_http, T_StringClientSocket, T_FSPackerClientSocket, T_OldFSPackerClientSocket, NoPayload)
 from .requestObj import Request
 # Program
 _dumpRequest:Callable[[T_Request], Any] = lambda x: x._dumps()
@@ -71,18 +71,20 @@ class Client(T_Client):
 			self.target = cast(Tuple[str, int], self.target)
 			if not isinstance(self.target, (tuple, list)) or len(self.target) != 2 or \
 			not isinstance(self.target[0], str) or not isinstance(self.target[1], int):
-				raise InitializationError("Target must be address and port in a list\tuple")
+				raise InitializationError("Target must be address and port in a list or tuple")
 		elif self.socketProtocol == "TCPv6":
 			self.target = cast(Tuple[str, int, int, int], self.target)
 			if  not isinstance(self.target, (tuple, list)) or len(self.target) != 4 or \
 			not isinstance(self.target[0], str) or not isinstance(self.target[1], int) or \
 			not isinstance(self.target[2], int) or not isinstance(self.target[3], int):
-				raise InitializationError("Target must be address, port, flow info and scope id in a list\tuple")
+				raise InitializationError("Target must be address, port, flow info and scope id in a list or tuple")
 		else:
 			raise InitializationError("Unsupported socket protocol")
 		if self.messageProtocol not in ["HTTP", "STR", "FSP", "OldFSProtocol"]:
 			raise InitializationError("Unsupported message protocol")
-		if self.requestProtocol not in ["JSONRPC-2", "JSONRPC-P", "FSP", "OldFSProtocol"]:
+		if self.requestProtocol in ("REST", "RAW"):
+			self.useBulkRequest = False
+		elif self.requestProtocol not in ("JSONRPC-2", "JSONRPC-P", "FSP", "OldFSProtocol"):
 			raise InitializationError("Unsupported request protocol")
 		if self.messageProtocol == "OldFSProtocol":
 			if self.requestProtocol != "OldFSProtocol":
@@ -151,26 +153,35 @@ class Client(T_Client):
 						self._sendRequest(chunk)
 				else:
 					for obj in objs:
-						self._sendRequest(obj._dumps(), path=obj._path)
-	def _sendRequest(self, data:Any, path:str="/", extraHttpHeaders:Optional[Dict[str, str]]=None) -> None:
-		payload:bytes
+						self._sendRequest(obj._dumps(), obj._httpMethod, obj._path, obj._httpHeaders)
+	def _sendRequest(self, data:Any, httpMethod:str="POST", path:str="/", httpHeaders:Dict[str, str]={}) -> None:
+		payload:bytes = b""
 		if isinstance(self.socket, T_HTTPClientSocket):
-			extraHttpHeaders = extraHttpHeaders or {}
-			extraHttpHeaders["host"] = self.httpHost or "{}:{}".format(self.target[0], self.target[1])
-			if self.requestProtocol in ["JSONRPC-2", "JSONRPC-P"]:
-				extraHttpHeaders["Content-Type"] = "application/json;charset=utf-8"
-				payload = json.dumps(data).encode('utf8')
-			elif self.requestProtocol == "FSP":
-				extraHttpHeaders["Content-Type"] = "application/fspacker"
-				payload = fsPacker.dumps(data, version=self.FSPACKER_VERSION)
-			else:
-				raise RuntimeError
-			self._sendToSocket(payload, path, extraHttpHeaders)
+			if "host" not in httpHeaders:
+				httpHeaders["host"] = self.httpHost or "{}:{}".format(self.target[0], self.target[1])
+			if data is not NoPayload:
+				if self.requestProtocol in ["JSONRPC-2", "JSONRPC-P", "REST"]:
+					if "content-type" not in httpHeaders:
+						httpHeaders["content-type"] = "application/json;charset=utf-8"
+					payload = json.dumps(data).encode('utf8')
+				elif self.requestProtocol == "FSP":
+					if "content-type" not in httpHeaders:
+						httpHeaders["content-type"] = "application/fspacker"
+					payload = fsPacker.dumps(data, version=self.FSPACKER_VERSION)
+				elif self.requestProtocol == "RAW":
+					assert type(data) is bytes
+					payload = data
+				else:
+					raise RuntimeError
+			self._sendToSocket(payload, httpMethod, path, httpHeaders)
 		elif isinstance(self.socket, T_FSPackerClientSocket):
-			if self.requestProtocol in ["JSONRPC-2", "JSONRPC-P"]:
+			if self.requestProtocol in ["JSONRPC-2", "JSONRPC-P", "REST"]:
 				payload = json.dumps(data).encode('utf8')
 			elif self.requestProtocol == "FSP":
 				payload = fsPacker.dumps(data, version=self.FSPACKER_VERSION)
+			elif self.requestProtocol == "RAW":
+				assert type(data) is bytes
+				payload = data
 			else:
 				raise RuntimeError
 			self._sendToSocket(payload)
@@ -181,18 +192,23 @@ class Client(T_Client):
 				raise RuntimeError
 			self._sendToSocket(payload)
 		elif isinstance(self.socket, T_StringClientSocket):
-			if self.requestProtocol in ["JSONRPC-2", "JSONRPC-P"]:
+			if self.requestProtocol in ["JSONRPC-2", "JSONRPC-P", "REST"]:
 				payload = json.dumps(data).encode('utf8')
 			elif self.requestProtocol == "FSP":
 				payload = fsPacker.dumps(data, version=self.FSPACKER_VERSION).hex().encode('utf8')
+			elif self.requestProtocol == "RAW":
+				if type(data) is bytes:
+					payload = data
+				else:
+					payload = data.encode("utf8")
 			else:
 				raise RuntimeError
 			self._sendToSocket(payload)
 		else:
 			raise RuntimeError
-	def _sendToSocket(self, payload:bytes, path:str="/", extraHttpHeaders:Dict[str, str]={}) -> None:
+	def _sendToSocket(self, payload:bytes, httpMethod:str="POST", path:str="/", httpHeaders:Dict[str, str]={}) -> None:
 		if isinstance(self.socket, T_BaseClientSocket_send_http):
-			self.socket.send(payload, path, extraHttpHeaders)
+			self.socket.send(payload, httpMethod, path, httpHeaders)
 		elif isinstance(self.socket, T_BaseClientSocket_send_default):
 			self.socket.send(payload)
 		else:
@@ -281,24 +297,49 @@ class Client(T_Client):
 			try:
 				data = json.loads(payload.decode(charset))
 			except:
-				raise MessageError("Invalid payload")
+				raise ResponseError("Invalid payload")
 			if not isinstance(data, list):
 				data = [data]
 			for r in data:
 				if not isinstance(r, dict):
-					raise MessageError("Invalid payload")
+					raise ResponseError("Invalid payload")
 				if "id" not in r:
-					raise MessageError("Required data missing: id")
+					raise ResponseError("Required data missing: id")
 				id = r["id"]
 				uid = r.get("uid", None)
 				isSuccess = not ("error" in r and r["error"])
 				if isSuccess:
 					if "result" not in r:
-						raise MessageError("Required data missing: result")
+						raise ResponseError("Required data missing: result")
 					result = r["result"]
 				else:
 					result = r["error"]
 				self._parseResult(id, isSuccess, result, uid)
+		elif self.requestProtocol == "REST":
+			try:
+				data = json.loads(payload.decode(charset))
+			except:
+				raise ResponseError("Invalid payload")
+			self._parseResult(
+				min(( cast(int, x) for x in self.requests.keys() if not self.requests[x].isDone())),
+				True,
+				data,
+				"",
+			)
+		elif self.requestProtocol == "RAW":
+			if self.messageProtocol == "STR":
+				try:
+					data = payload.decode('utf8')
+				except:
+					raise ResponseError("Invalid payload")
+			else:
+				data = payload
+			self._parseResult(
+				min(( cast(int, x) for x in self.requests.keys() if not self.requests[x].isDone())),
+				True,
+				data,
+				"",
+			)
 		elif self.requestProtocol == "FSP":
 			if self.messageProtocol == "STR":
 				payload = bytes.fromhex(payload.decode(charset))
@@ -311,7 +352,7 @@ class Client(T_Client):
 					recursiveLimit=512,
 				)
 			except:
-				raise MessageError("Invalid payload")
+				raise ResponseError("Invalid payload")
 			if not isinstance(data, list):
 				data = [data]
 			for chunk in data:
@@ -321,7 +362,7 @@ class Client(T_Client):
 				(isinstance(chunk[3], str) or chunk[3] is None):
 					self._parseResult(*chunk)
 				else:
-					raise MessageError("Invalid payload")
+					raise ResponseError("Invalid payload")
 		elif self.requestProtocol == "OldFSProtocol":
 			if self.messageProtocol == "STR":
 				payload = bytes.fromhex(payload.decode(charset))
@@ -332,7 +373,7 @@ class Client(T_Client):
 			isinstance(resp[2], bytes):
 				self._parseResult(resp[0], resp[1], pickle.loads(decompress(resp[2])), "")
 			else:
-				raise MessageError("Invalid payload")
+				raise ResponseError("Invalid payload")
 	def _parseResult(self, id:Union[int, str], isSuccess:bool, result:Any, uid:str) -> None:
 		if id not in self.requests:
 			self.log.warn("Got unexpected result id: {}", id)
@@ -353,15 +394,32 @@ class Client(T_Client):
 		self.clear()
 		self.log.debug("Closed")
 	__del__ = close
-	def request(self, method:str, args:List[Any]=[], kwargs:Dict[str, Any]={}, id:Optional[Union[str, int]]=None,
-	path:str="/") -> T_Request:
-		if id is None:
+	def request(self, method:str="", args:List[Any]=[], kwargs:Dict[str, Any]={}, id:Optional[Union[str, int]]=None,
+	path:str="/", httpMethod:str="POST", httpHeaders:Optional[Dict[str, str]]=None, payload:Any=NoPayload) -> T_Request:
+		if self.requestProtocol in ("REST", "RAW"):
+			if self.messageProtocol == "HTTP":
+				if httpMethod == "POST" and payload is NoPayload:
+					raise RequestError("Payload is missing during HTTP POST")
+				elif httpMethod != "POST" and payload is not NoPayload:
+					raise RequestError("Payload can be only sent only through POST HTTP method")
+			elif payload is not NoPayload:
+				raise RequestError("Payload is missing")
 			id = self.id
 			self.id += 1
-		if type(id) not in [int, str]:
-			raise RequestError("Request ID can be only str or int")
-		if id in self.requests:
-			raise RequestError("Request ID already in use: {}".format(id))
+		else:
+			if id is None:
+				id = self.id
+				self.id += 1
+			if type(id) not in [int, str]:
+				raise RequestError("Request ID can be only str or int")
+			if id in self.requests:
+				raise RequestError("Request ID already in use: {}".format(id))
+		rHttpHeaders = {}
+		for k, v in self.extraHttpHeaders.items():
+			rHttpHeaders[k.lower()] = v
+		if httpHeaders:
+			for k, v in httpHeaders.items():
+				rHttpHeaders[k.lower()] = v
 		obj = Request(
 			self,
 			id,
@@ -369,10 +427,13 @@ class Client(T_Client):
 			args,
 			kwargs,
 			path,
+			httpMethod,
+			rHttpHeaders,
+			payload,
 			self.convertNumbers,
 		)
 		self.requests[id] = obj
 		self.log.info("Request queued: {} [{}]".format(method, id))
 		if hasattr(self, "socket"):
-			self._sendRequest( obj._dumps() )
+			self._sendRequest(obj._dumps(), httpMethod, path, rHttpHeaders)
 		return obj

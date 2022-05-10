@@ -43,6 +43,8 @@ class SSLContext(metaclass=ABCMeta):
 	def wrap_socket(self, sock:T_Socket, server_side:bool=..., do_handshake_on_connect:bool=..., suppress_ragged_eofs:bool=...,
 	server_hostname:Optional[str]=..., session:Optional[SSLSession]=...) -> T_Socket: ...
 
+class NoPayload: ...
+
 class T_Client(metaclass=ABCMeta):
 	max_bulk_request:int
 	FSPACKER_VERSION:int
@@ -83,9 +85,9 @@ class T_Client(metaclass=ABCMeta):
 	@abstractmethod
 	def _connect(self, sendOlderRequests:bool=...) -> None: ...
 	@abstractmethod
-	def _sendRequest(self, data:Any, path:str=..., extraHttpHeaders:Optional[Dict[str, str]]=...) -> None: ...
+	def _sendRequest(self, data:Any, httpMethod:str=..., path:str=..., httpHeaders:Dict[str, str]=...) -> None: ...
 	@abstractmethod
-	def _sendToSocket(self, payload:bytes, path:str=..., extraHttpHeaders:Dict[str, str]=...) -> None: ...
+	def _sendToSocket(self, payload:bytes, httpMethod:str=..., path:str=..., httpHeaders:Dict[str, str]=...) -> None: ...
 	@abstractmethod
 	def _createSocket(self) -> None: ...
 	@abstractmethod
@@ -163,13 +165,13 @@ class T_BaseClientSocket_send_default(T_BaseClientSocket, metaclass=ABCMeta):
 
 class T_BaseClientSocket_send_http(T_BaseClientSocket, metaclass=ABCMeta):
 	@abstractmethod
-	def send(self, payload:bytes=b"", path:str=..., headers:Dict[str, str]=...) -> None: ...
+	def send(self, payload:bytes=b"", httpMethod:str=..., path:str=..., headers:Dict[str, str]=...) -> None: ...
 
 class T_HTTPClientSocket(T_BaseClientSocket_send_http, metaclass=ABCMeta):
 	defaultHeaders:Dict[str, str]
 	headers:T_Headers
 	@abstractmethod
-	def send(self, payload:bytes=b"", path:str=..., headers:Dict[str, str]=...) -> None: ...
+	def send(self, payload:bytes=b"", httpMethod:str=..., path:str=..., headers:Dict[str, str]=...) -> None: ...
 
 class T_StringClientSocket(T_BaseClientSocket_send_default, metaclass=ABCMeta):
 	pass
@@ -217,6 +219,9 @@ class T_Request(metaclass=ABCMeta):
 	_args:List[Any]
 	_kwargs:Dict[Any, Any]
 	_path:str
+	_httpMethod:str
+	_httpHeaders:Dict[str, str]
+	_payload:str
 	_convertNumbers:Optional[str]
 	_requestTime:float
 	_responseTime:float
