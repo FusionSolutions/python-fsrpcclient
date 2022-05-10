@@ -46,7 +46,7 @@ class BaseClientSocket(T_BaseClientSocket):
 			elif self.protocol == "IPC":
 				self.log.info("Connecting to {} ..".format(self.target))
 		cerr = self.sock.connect_ex(self.target)
-		if cerr in [errno.EAGAIN, errno.EINPROGRESS]: # errno.ENETUNREACH, errno.EADDRNOTAVAIL
+		if cerr in [errno.EAGAIN, errno.EINPROGRESS]:
 			return False
 		elif cerr in [0, errno.EISCONN]:
 			if self.ssl:
@@ -119,8 +119,6 @@ class BaseClientSocket(T_BaseClientSocket):
 			except OSError as err:
 				if err.errno == errno.EADDRINUSE:
 					self.log.warn("Bind address {} already in use, switch to automatic", self.bind)
-					# elif err.errno == errno.EADDRNOTAVAIL:
-					# 	self.log.warn("Bind address {} not available, switch to automatic", self.bind)
 				else:
 					self._raiseSocketError("Error during binding socket to {}: {}".format(self.bind, err))
 				self.bind = None
@@ -334,10 +332,6 @@ class HTTPClientSocket(BaseClientSocket, T_HTTPClientSocket):
 			httpResponse = rawHeaders.pop(0).split(" ")
 			if len(httpResponse) < 2:
 				self._raiseMessageError("Invalid HTTP response code")
-			# if httpResponse[1] == "503":
-			# 	self._raiseSocketError("Server offline")
-			# elif httpResponse[1] != "200":
-			# 	self._raiseSocketError("Request failure")
 			headers = Headers()
 			for rawHeader in rawHeaders:
 				s = rawHeader.find(":")
@@ -382,12 +376,9 @@ class HTTPClientSocket(BaseClientSocket, T_HTTPClientSocket):
 				while not self.signal.get():
 					cpos = rawDataCache.find(chunkEndLine)
 					if cpos == -1:
-						# if chunkLength == 0:
-						# 	break
 						return False
 					cLength += 2
 					if chunkLength == 0:
-						# Be kell kernunk a chunk hosszat
 						rawChunk = rawDataCache[:cpos]
 						cLength += cpos+2
 						if len(rawChunk) == 0:
@@ -406,10 +397,8 @@ class HTTPClientSocket(BaseClientSocket, T_HTTPClientSocket):
 						elif chunkLength > len(rawDataCache):
 							return False
 					else:
-						# Adatot olvasunk
 						if cpos > chunkLength:
 							self._raiseMessageError("Invalid HTTP chunk size")
-						# A cpos ig adat van!
 						payload += rawDataCache[:cpos]
 						rawDataCache = rawDataCache[cpos+2:]
 						chunkLength -= cpos
