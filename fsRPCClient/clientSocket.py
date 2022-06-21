@@ -1,5 +1,6 @@
 # Builtin modules
-import re, ssl, traceback, socket, errno, codecs
+import re, ssl, traceback, socket, errno, codecs, weakref
+from io import BytesIO
 from time import monotonic
 from typing import Tuple, Dict, Union, Callable, NoReturn, Optional, cast
 from selectors import DefaultSelector, EVENT_READ, EVENT_WRITE
@@ -22,7 +23,7 @@ class BaseClientSocket(T_BaseClientSocket):
 	bind:Optional[T_SocketBindAddress], connectTimeout:Union[int, float], transferTimeout:Union[int, float], ssl:bool,
 	sslHostname:Optional[str]) -> None:
 		assert protocol in ["TCPv4", "TCPv6", "IPC"], "Unsupported protocol"
-		self.client            = client
+		self.client            = weakref.proxy(client)
 		self.protocol          = protocol
 		self.target            = target
 		self.connectTimeout    = float(connectTimeout)
@@ -233,18 +234,22 @@ class BaseClientSocket(T_BaseClientSocket):
 		self.log.error(err)
 		raise MessageError(err) from None
 	def _reset(self) -> None:
+		self.log.debug("Reseting..")
 		self.readBuffer = b""
 		self.writeBuffer = b""
 		self.connectionStatus = NOT_CONNECTED
 		self.timeoutTimer = 0.0
 		if hasattr(self, "sock"):
+			self.log.trace("SOCKET SHUTDOWN")
 			try: self.sock.shutdown(socket.SHUT_RDWR)
 			except: pass
+			self.log.trace("SOCKET CLOSE")
 			try: self.sock.close()
 			except: pass
 			del self.sock
 		self.mask = EVENT_READ
 		self.sslTimer = 0.0
+		self.log.debug("Reseted")
 	def _setMask(self, newMask:int) -> None:
 		if self.sockFD and self.mask != newMask:
 			self.mask = newMask
@@ -257,7 +262,7 @@ class BaseClientSocket(T_BaseClientSocket):
 			self._setMask(EVENT_READ | EVENT_WRITE)
 	def close(self) -> None:
 		if hasattr(self, "sock"):
-			self.log.trace("Closing [FD:{}]", self.sockFD)
+			self.log.debug("Closing [FD:{}]", self.sockFD)
 			self.mask = EVENT_READ
 			self._reset()
 			self.log.debug("Closed")
@@ -314,7 +319,6 @@ class HTTPClientSocket(BaseClientSocket, T_HTTPClientSocket):
 		self.headers.update(extraHeaders)
 		if not disableCompression:
 			self.headers.update({"accept-encoding":"deflate"})
-		return None
 	def parseReadBuffer(self) -> bool:
 		endLine = b"\r\n"
 		pos = self.readBuffer.find(endLine*2)
@@ -348,7 +352,9 @@ class HTTPClientSocket(BaseClientSocket, T_HTTPClientSocket):
 				if cLength < 0:
 					self._raiseMessageError("Invalid HTTP header value for content-length")
 			elif "chunked" not in headers.get("transfer-encoding", "").lower():
-				self._raiseMessageError("Invalid HTTP transfer encoding. Not chunked and no content-length given.")
+				self._raiseMessageError(
+					"Invalid HTTP transfer encoding. Content-Length is required when encoding is not chunked."
+				)
 			cEncoding = headers.get("content-encoding", "")
 			if cEncoding == "":
 				compression = False
@@ -369,39 +375,42 @@ class HTTPClientSocket(BaseClientSocket, T_HTTPClientSocket):
 			#
 			payload = b""
 			if cLength is None:
-				chunkEndLine = b"\r\n"
-				rawDataCache = rawData
-				cLength = 0
+				rawDataCache = BytesIO(rawData)
 				chunkLength = 0
 				while not self.signal.get():
-					cpos = rawDataCache.find(chunkEndLine)
-					if cpos == -1:
-						return False
-					cLength += 2
+					# we read the chunk length
+					rawChunkLength = rawDataCache.readline()
+					if rawChunkLength[-2:] != b"\r\n":
+						self._raiseMessageError("Invalid HTTP chunk size")
+					if len(rawChunkLength) > 10:
+						self._raiseMessageError("HTTP chunk too big")
+					# Converting from hexa to int
+					try:
+						chunkLength = int(rawChunkLength[:-2], 16)
+					except:
+						self._raiseMessageError("Invalid HTTP chunk length")
+					# Maximum limit of a chunk
+					if chunkLength > 0xFFFFFFFF:
+						self._raiseMessageError("HTTP chunk too big")
+					# When the length is zero, then the data is over
 					if chunkLength == 0:
-						rawChunk = rawDataCache[:cpos]
-						cLength += cpos+2
-						if len(rawChunk) == 0:
-							break
-						rawDataCache = rawDataCache[cpos+2:]
-						try:
-							chunkLength = int(rawChunk, 16)
-						except:
-							self._raiseMessageError("Invalid HTTP chunk length")
-						cLength += chunkLength
-						if chunkLength == 0:
-							cLength += 2
-							break
-						elif chunkLength > 0xFFFFFF:
-							self._raiseMessageError("HTTP chunk too big")
-						elif chunkLength > len(rawDataCache):
-							return False
-					else:
-						if cpos > chunkLength:
-							self._raiseMessageError("Invalid HTTP chunk size")
-						payload += rawDataCache[:cpos]
-						rawDataCache = rawDataCache[cpos+2:]
-						chunkLength -= cpos
+						cLength = rawDataCache.tell()
+						# Maybe the server puts an `\r\n `end to the data
+						if rawDataCache.read(2) == b"\r\n":
+							cLength = rawDataCache.tell()
+						break
+					# Read the whole chunk from the buffer
+					chunk = rawDataCache.read(chunkLength)
+					# Compare the length what we readed, when not equals then we did not have the whole data
+					if len(chunk) != chunkLength:
+						return False
+					payload += chunk
+					# we read the chunk end indicator `\r\n` from the end
+					eoc = rawDataCache.read(2)
+					if len(eoc) != 2:
+						return False
+					if eoc != b"\r\n":
+						self._raiseMessageError("Invalid HTTP chunk data")
 			else:
 				if len(rawData) < cLength:
 					return False
