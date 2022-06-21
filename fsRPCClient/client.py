@@ -388,6 +388,7 @@ class Client(T_Client):
 		opts.update(kwargs)
 		return Client(**opts)
 	def close(self) -> None:
+		self.log.debug("Closing..")
 		if hasattr(self, "socket"):
 			self.socket.close()
 			del self.socket
@@ -397,13 +398,6 @@ class Client(T_Client):
 	def request(self, method:str="", args:List[Any]=[], kwargs:Dict[str, Any]={}, id:Optional[Union[str, int]]=None,
 	path:str="/", httpMethod:str="POST", httpHeaders:Optional[Dict[str, str]]=None, payload:Any=NoPayload) -> T_Request:
 		if self.requestProtocol in ("REST", "RAW"):
-			if self.messageProtocol == "HTTP":
-				if httpMethod == "POST" and payload is NoPayload:
-					raise RequestError("Payload is missing during HTTP POST")
-				elif httpMethod != "POST" and payload is not NoPayload:
-					raise RequestError("Payload can be only sent only through POST HTTP method")
-			elif payload is not NoPayload:
-				raise RequestError("Payload is missing")
 			id = self.id
 			self.id += 1
 		else:
