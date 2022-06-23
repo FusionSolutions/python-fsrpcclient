@@ -381,7 +381,9 @@ class HTTPClientSocket(BaseClientSocket, T_HTTPClientSocket):
 					# we read the chunk length
 					rawChunkLength = rawDataCache.readline()
 					if rawChunkLength[-2:] != b"\r\n":
-						self._raiseMessageError("Invalid HTTP chunk size")
+						# We waiting for the next chunk
+						return False
+						# self._raiseMessageError("Invalid HTTP chunk size")
 					if len(rawChunkLength) > 10:
 						self._raiseMessageError("HTTP chunk too big")
 					# Converting from hexa to int
