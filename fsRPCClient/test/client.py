@@ -161,7 +161,7 @@ class ClientTest(unittest.TestCase):
 			retryCount=2,
 			retryDelay=1,
 			log=Logger("Client"),
-			signal=SoftSignal()
+			signal=SoftSignal(),
 		)
 		s = monotonic()
 		r = rootClient.request("ping")
@@ -170,3 +170,12 @@ class ClientTest(unittest.TestCase):
 		except:
 			pass
 		self.assertGreater(monotonic()-s, 1.0)
+	def test_binance(self) -> None:
+		with Client(
+			"TCPv4:HTTP:REST",
+			("fapi.binance.com", 443),
+			ssl=True,
+			log=Logger("Client"),
+			signal=SoftSignal(),
+		) as clnt:
+			clnt.request(httpMethod="GET", path="/fapi/v1/premiumIndex").get()
