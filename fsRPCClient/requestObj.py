@@ -1,6 +1,7 @@
 # Builtin modules
 from __future__ import annotations
 from time import monotonic
+from http import HTTPStatus
 from typing import Any, Union, List, Dict, Optional
 # Third party modules
 # Local modules
@@ -27,15 +28,18 @@ class Request(T_Request):
 		self._done         = False
 		self._success      = False
 		self._response     = None
+		self._httpStatus   = None
 	def _get(self) -> None:
 		self._client._get(self._id)
 		return None
-	def _parseResponse(self, id:Union[int, str], isSuccess:bool, result:Any, uid:str) -> None:
+	def _parseResponse(self, id:Union[int, str], isSuccess:bool, result:Any, uid:str,
+	httpStatus:Optional[HTTPStatus]=None) -> None:
 		self._done = True
 		self._responseTime = monotonic()
 		self._uid = uid
 		self._success = isSuccess
 		self._response = result
+		self._httpStatus = httpStatus
 	def _dumps(self) -> Any:
 		r:Any
 		if self._client.requestProtocol == "JSONRPC-2":
@@ -86,3 +90,7 @@ class Request(T_Request):
 		if not self._done:
 			self._get()
 		return self._success
+	def getHTTPStatus(self) -> Optional[HTTPStatus]:
+		if not self._done:
+			self._get()
+		return self._httpStatus

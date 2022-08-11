@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABCMeta, abstractmethod
 from selectors import BaseSelector
 from ssl import SSLSession
+from http import HTTPStatus
 from weakref import WeakValueDictionary
 from typing import List, Dict, Tuple, Union, Callable, Optional, Any, NoReturn, Iterable, Iterator
 # Third party modules
@@ -93,9 +94,11 @@ class T_Client(metaclass=ABCMeta):
 	@abstractmethod
 	def _get(self, id:Any) -> None: ...
 	@abstractmethod
-	def _parseResponse(self, payload:bytes, headers:Optional[T_Headers]=..., charset:str=...) -> None: ...
+	def _parseResponse(self, payload:bytes, headers:Optional[T_Headers]=..., charset:str=...,
+	httpStatus:Optional[HTTPStatus]=...) -> None: ...
 	@abstractmethod
-	def _parseResult(self, id:Union[int, str], isSuccess:bool, result:Any, uid:str) -> None: ...
+	def _parseResult(self, id:Union[int, str], isSuccess:bool, result:Any, uid:str,
+	httpStatus:Optional[HTTPStatus]=...) -> None: ...
 	@abstractmethod
 	def clear(self) -> None: ...
 	@abstractmethod
@@ -224,6 +227,7 @@ class T_Request(metaclass=ABCMeta):
 	_convertNumbers:Optional[str]
 	_requestTime:float
 	_responseTime:float
+	_httpStatus:Optional[HTTPStatus]
 	_uid:str
 	_done:bool
 	_success:bool
@@ -231,7 +235,8 @@ class T_Request(metaclass=ABCMeta):
 	@abstractmethod
 	def _get(self) -> None: ...
 	@abstractmethod
-	def _parseResponse(self, id:Union[int, str], isSuccess:bool, result:Any, uid:str) -> None: ...
+	def _parseResponse(self, id:Union[int, str], isSuccess:bool, result:Any, uid:str,
+	httpStatus:Optional[HTTPStatus]=...) -> None: ...
 	@abstractmethod
 	def _dumps(self) -> Any: ...
 	@abstractmethod
@@ -246,3 +251,5 @@ class T_Request(metaclass=ABCMeta):
 	def getUID(self) -> str: ...
 	@abstractmethod
 	def isSuccess(self) -> bool: ...
+	@abstractmethod
+	def getHTTPStatus(self) -> Optional[HTTPStatus]: ...
