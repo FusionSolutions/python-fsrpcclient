@@ -91,4 +91,6 @@ class Request(T_Request):
 			self._get()
 		return self._success
 	def getHTTPStatus(self) -> Optional[HTTPStatus]:
+		if not self._done:
+			self._get()
 		return self._httpStatus
