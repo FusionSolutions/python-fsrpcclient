@@ -1,6 +1,7 @@
 # Builtin modules
 from __future__ import annotations
 import json, weakref, pickle
+from http import HTTPStatus
 from lz4.frame import decompress # type: ignore
 from typing import Any, Union, List, Dict, Tuple, Optional, Callable, cast
 # Third party modules
@@ -292,7 +293,8 @@ class Client(T_Client):
 					self.socketErrors += 1
 					continue
 				raise
-	def _parseResponse(self, payload:bytes, headers:Optional[T_Headers]=None, charset:str="utf8") -> None:
+	def _parseResponse(self, payload:bytes, headers:Optional[T_Headers]=None, charset:str="utf8",
+	httpStatus:Optional[HTTPStatus]=None) -> None:
 		if self.requestProtocol in ["JSONRPC-2", "JSONRPC-P"]:
 			try:
 				data = json.loads(payload.decode(charset))
@@ -314,7 +316,7 @@ class Client(T_Client):
 					result = r["result"]
 				else:
 					result = r["error"]
-				self._parseResult(id, isSuccess, result, uid)
+				self._parseResult(id, isSuccess, result, uid, httpStatus)
 		elif self.requestProtocol == "REST":
 			try:
 				data = json.loads(payload.decode(charset))
@@ -325,6 +327,7 @@ class Client(T_Client):
 				True,
 				data,
 				"",
+				httpStatus,
 			)
 		elif self.requestProtocol == "RAW":
 			if self.messageProtocol == "STR":
@@ -339,6 +342,7 @@ class Client(T_Client):
 				True,
 				data,
 				"",
+				httpStatus,
 			)
 		elif self.requestProtocol == "FSP":
 			if self.messageProtocol == "STR":
@@ -374,13 +378,13 @@ class Client(T_Client):
 				self._parseResult(resp[0], resp[1], pickle.loads(decompress(resp[2])), "")
 			else:
 				raise ResponseError("Invalid payload")
-	def _parseResult(self, id:Union[int, str], isSuccess:bool, result:Any, uid:str) -> None:
+	def _parseResult(self, id:Union[int, str], isSuccess:bool, result:Any, uid:str, httpStatus:Optional[HTTPStatus]=None) -> None:
 		if id not in self.requests:
 			self.log.warn("Got unexpected result id: {}", id)
 			return
 		obj = self.requests[id]
 		self.log.debug("Received result for ID: {} UID: {}".format(id, uid))
-		obj._parseResponse( id, isSuccess, result, uid )
+		obj._parseResponse(id, isSuccess, result, uid, httpStatus)
 	def clear(self) -> None:
 		self.requests.clear()
 	def clone(self, **kwargs:Any) -> T_Client:

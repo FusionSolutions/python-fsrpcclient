@@ -5,6 +5,7 @@ from time import monotonic
 from typing import Tuple, Dict, Union, Callable, NoReturn, Optional, cast
 from selectors import DefaultSelector, EVENT_READ, EVENT_WRITE
 from math import ceil
+from http import HTTPStatus
 # Third party modules
 import fsPacker
 # Local modules
@@ -278,11 +279,13 @@ class BaseClientSocket(T_BaseClientSocket):
 	def _isConnected(self) -> bool:
 		return self.connectionStatus == CONNECTED
 	def isAlive(self) -> bool:
-		return not (
-			(self.connectionStatus == NOT_CONNECTED) or
-			(self.connectionStatus == CONNECTING and monotonic()-self.timeoutTimer > self.connectTimeout) or
-			(self.connectionStatus == CONNECTED and monotonic()-self.timeoutTimer > self.transferTimeout)
-		)
+		if (
+				(self.connectionStatus == NOT_CONNECTED) or
+				(self.connectionStatus == CONNECTING and monotonic()-self.timeoutTimer > self.connectTimeout) or
+				(self.connectionStatus == CONNECTED and monotonic()-self.timeoutTimer > self.transferTimeout)
+			):
+			return False
+		return True
 	def loop(self, whileFn:Callable[[], bool]) -> None:
 		checkTimer = monotonic()
 		try:
@@ -334,7 +337,13 @@ class HTTPClientSocket(BaseClientSocket, T_HTTPClientSocket):
 			if not rawHeaders:
 				self._raiseMessageError("Invalid HTTP headers")
 			httpResponse = rawHeaders.pop(0).split(" ")
-			if len(httpResponse) < 2:
+			if len(httpResponse) != 3:
+				self._raiseMessageError("Invalid HTTP response code")
+			if not httpResponse[1].isdigit():
+				self._raiseMessageError("Invalid HTTP response code")
+			try:
+				responseHTTPStatus = HTTPStatus(int(httpResponse[1]))
+			except:
 				self._raiseMessageError("Invalid HTTP response code")
 			headers = Headers()
 			for rawHeader in rawHeaders:
@@ -427,7 +436,7 @@ class HTTPClientSocket(BaseClientSocket, T_HTTPClientSocket):
 					self._raiseMessageError("Invalid response content")
 			if self.log.isFiltered("TRACE"):
 				self.log.trace("Payload [len: {}]: {}", len(payload), payload)
-			self.client._parseResponse(payload, headers, charset)
+			self.client._parseResponse(payload, headers, charset, responseHTTPStatus)
 			pos = self.readBuffer.find(endLine*2)
 		return False
 	def send(self, payload:bytes=b"", httpMethod:str="POST", path:str="/", headers:Dict[str, str]={}) -> None:

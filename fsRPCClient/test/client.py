@@ -1,6 +1,7 @@
 # Builtin modules
 import os, unittest
 from time import monotonic
+from http import HTTPStatus
 # Third party modules
 from fsLogger import SimpleLogger, Logger
 from fsSignal import Signal, SoftSignal
@@ -46,6 +47,7 @@ class ClientTest(unittest.TestCase):
 				"data": "ping() takes 0 positional argument but 1 were given",
 				"message": "Invalid params"
 			})
+			assert(r.getHTTPStatus() == HTTPStatus.OK)
 			r = c.request("surenoteexists")
 			self.assertEqual(r.isSuccess(), False)
 			self.assertEqual(r.isDone(), True)
