@@ -336,8 +336,8 @@ class HTTPClientSocket(BaseClientSocket, T_HTTPClientSocket):
 			rawHeaders = self.readBuffer[:pos].decode("ISO-8859-1").split(endLine.decode("ISO-8859-1"))
 			if not rawHeaders:
 				self._raiseMessageError("Invalid HTTP headers")
-			httpResponse = rawHeaders.pop(0).split(" ")
-			if len(httpResponse) != 3:
+			httpResponse = rawHeaders.pop(0).split(" ", 2)
+			if len(httpResponse) < 2:
 				self._raiseMessageError("Invalid HTTP response code")
 			if not httpResponse[1].isdigit():
 				self._raiseMessageError("Invalid HTTP response code")
