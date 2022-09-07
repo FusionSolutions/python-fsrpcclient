@@ -1,6 +1,7 @@
 # Builtin modules
 from __future__ import annotations
 import zlib
+from copy import deepcopy
 from typing import Dict, Any, List, Tuple, Iterator, Iterable, Optional, Generator, cast
 # Local modules
 from .abcs import T_Headers
@@ -39,10 +40,10 @@ class Headers(T_Headers):
 		return self
 	def dumps(self, extend:Dict[str, str]={}) -> str:
 		h:List[str] = []
-		for k, v in self.data.items():
+		dh:Dict[str, str] = deepcopy(self.data)
+		dh.update(extend)
+		for k, v in dh.items():
 			h.append("{}: {}".format(k, v))
-		for k, v in extend.items():
-			h.append("{}: {}".format(k.lower(), v))
 		return "\r\n".join(h)
 
 class deflate:

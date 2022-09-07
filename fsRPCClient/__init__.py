@@ -1,4 +1,4 @@
-__version__ = "0.3.5"
+__version__ = "0.3.6"
 __doc__ = """
 Python client for Fusion Explorer API v{}
 Copyright (C) 2021 Fusion Solutions KFT <contact@fusionsolutions.io>
