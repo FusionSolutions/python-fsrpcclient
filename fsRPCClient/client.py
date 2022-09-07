@@ -413,8 +413,6 @@ class Client(T_Client):
 			if id in self.requests:
 				raise RequestError("Request ID already in use: {}".format(id))
 		rHttpHeaders = {}
-		for k, v in self.extraHttpHeaders.items():
-			rHttpHeaders[k.lower()] = v
 		if httpHeaders:
 			for k, v in httpHeaders.items():
 				rHttpHeaders[k.lower()] = v
