@@ -350,8 +350,6 @@ class Client(T_Client):
 			try:
 				_, data = fsPacker.loads(
 					payload,
-					maxDictSize=0,
-					maxOPSize=0,
 					maxIndexSize=0,
 					recursiveLimit=512,
 				)
