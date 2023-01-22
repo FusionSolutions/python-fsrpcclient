@@ -24,7 +24,7 @@ class Client(T_Client):
 	def __init__(self, protocol:str, target:Union[str, Tuple[str, int], Tuple[str, int, int, int]],
 	connectTimeout:Union[int, float]=15, transferTimeout:Union[int, float]=320, retryCount:int=10,
 	retryDelay:Union[int, float]=5, ssl:bool=False, sslHostname:Optional[str]=None, httpHost:Optional[str]=None,
-	extraHttpHeaders:Dict[str, str]={}, disableCompression:bool=False, useBulkRequest:bool=True,
+	extraHttpHeaders:Dict[str, str]={}, path:str="/", disableCompression:bool=False, useBulkRequest:bool=True,
 	convertNumbers:Optional[str]=None, bind:Optional[T_SocketBindAddress]=None, log:Optional[T_Logger]=None,
 	signal:Optional[T_Signal]=None) -> None:
 		self.protocol           = protocol
@@ -37,6 +37,7 @@ class Client(T_Client):
 		self.sslHostname        = sslHostname
 		self.httpHost           = httpHost
 		self.extraHttpHeaders   = extraHttpHeaders
+		self.path               = path
 		self.disableCompression = disableCompression
 		self.useBulkRequest     = useBulkRequest
 		self.convertNumbers     = convertNumbers
@@ -114,6 +115,7 @@ class Client(T_Client):
 			"sslHostname":       self.sslHostname,
 			"httpHost":          self.httpHost,
 			"extraHttpHeaders":  self.extraHttpHeaders,
+			"path":              self.path,
 			"disableCompression":self.disableCompression,
 			"useBulkRequest":    self.useBulkRequest,
 			"convertNumbers":    self.convertNumbers,
@@ -132,6 +134,7 @@ class Client(T_Client):
 		self.sslHostname        = states["sslHostname"]
 		self.httpHost           = states["httpHost"]
 		self.extraHttpHeaders   = states["extraHttpHeaders"]
+		self.path               = states["path"]
 		self.disableCompression = states["disableCompression"]
 		self.useBulkRequest     = states["useBulkRequest"]
 		self.convertNumbers     = states["convertNumbers"]
@@ -227,6 +230,7 @@ class Client(T_Client):
 					ssl                = self.ssl,
 					sslHostname        = self.sslHostname,
 					extraHeaders       = self.extraHttpHeaders,
+					path               = self.path,
 					disableCompression = self.disableCompression,
 				)
 			elif self.messageProtocol == "STR":
@@ -398,7 +402,8 @@ class Client(T_Client):
 		self.log.debug("Closed")
 	__del__ = close
 	def request(self, method:str="", args:List[Any]=[], kwargs:Dict[str, Any]={}, id:Optional[Union[str, int]]=None,
-	path:str="/", httpMethod:str="POST", httpHeaders:Optional[Dict[str, str]]=None, payload:Any=NoPayload) -> T_Request:
+	path:Optional[str]=None, httpMethod:str="POST", httpHeaders:Optional[Dict[str, str]]=None,
+	payload:Any=NoPayload) -> T_Request:
 		if self.requestProtocol in ("REST", "RAW"):
 			id = self.id
 			self.id += 1
@@ -420,7 +425,7 @@ class Client(T_Client):
 			method,
 			args,
 			kwargs,
-			path,
+			path or self.path,
 			httpMethod,
 			rHttpHeaders,
 			payload,
@@ -429,5 +434,5 @@ class Client(T_Client):
 		self.requests[id] = obj
 		self.log.info("Request queued: {} [{}]".format(method, id))
 		if hasattr(self, "socket"):
-			self._sendRequest(obj._dumps(), httpMethod, path, rHttpHeaders)
+			self._sendRequest(obj._dumps(), httpMethod, path or self.path, rHttpHeaders)
 		return obj
