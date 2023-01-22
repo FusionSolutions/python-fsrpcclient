@@ -316,8 +316,9 @@ class HTTPClientSocket(BaseClientSocket, T_HTTPClientSocket):
 	}
 	def __init__(self, client:T_Client, protocol:str, target:Union[str, Tuple[str, int], Tuple[str, int, int, int]],
 	bind:Optional[T_SocketBindAddress], connectTimeout:Union[int, float], transferTimeout:Union[int, float], ssl:bool=False,
-	sslHostname:Optional[str]=None, extraHeaders:Dict[str, str]={}, disableCompression:bool=False) -> None:
+	sslHostname:Optional[str]=None, extraHeaders:Dict[str, str]={}, path:str="/", disableCompression:bool=False) -> None:
 		super().__init__(client, protocol, target, bind, connectTimeout, transferTimeout, ssl, sslHostname)
+		self.path = path
 		self.headers = Headers(self.defaultHeaders)
 		self.headers.update(extraHeaders)
 		if not disableCompression:
@@ -439,8 +440,8 @@ class HTTPClientSocket(BaseClientSocket, T_HTTPClientSocket):
 			self.client._parseResponse(payload, headers, charset, responseHTTPStatus)
 			pos = self.readBuffer.find(endLine*2)
 		return False
-	def send(self, payload:bytes=b"", httpMethod:str="POST", path:str="/", headers:Dict[str, str]={}) -> None:
-		rawHeader = "{} {} HTTP/1.1\r\n".format(httpMethod, path)
+	def send(self, payload:bytes=b"", httpMethod:str="POST", path:Optional[str]=None, headers:Dict[str, str]={}) -> None:
+		rawHeader = "{} {} HTTP/1.1\r\n".format(httpMethod, path or self.path)
 		if payload:
 			headers["content-length"] = str(len(payload))
 		rawHeader += self.headers.dumps(extend=headers)

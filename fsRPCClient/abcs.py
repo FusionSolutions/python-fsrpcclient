@@ -108,7 +108,7 @@ class T_Client(metaclass=ABCMeta):
 	def close(self) -> None: ...
 	@abstractmethod
 	def request(self, method:str=..., args:List[Any]=..., kwargs:Dict[str, Any]=..., id:Optional[Union[str, int]]=...,
-	path:str=..., httpMethod:str=..., httpHeaders:Optional[Dict[str, str]]=..., payload:Any=...) -> T_Request: ...
+	path:Optional[str]=..., httpMethod:str=..., httpHeaders:Optional[Dict[str, str]]=..., payload:Any=...) -> T_Request: ...
 
 class T_BaseClientSocket(metaclass=ABCMeta):
 	client:T_Client
@@ -174,8 +174,9 @@ class T_BaseClientSocket_send_http(T_BaseClientSocket, metaclass=ABCMeta):
 class T_HTTPClientSocket(T_BaseClientSocket_send_http, metaclass=ABCMeta):
 	defaultHeaders:Dict[str, str]
 	headers:T_Headers
+	path:str
 	@abstractmethod
-	def send(self, payload:bytes=b"", httpMethod:str=..., path:str=..., headers:Dict[str, str]=...) -> None: ...
+	def send(self, payload:bytes=b"", httpMethod:str=..., path:Optional[str]=..., headers:Dict[str, str]=...) -> None: ...
 
 class T_StringClientSocket(T_BaseClientSocket_send_default, metaclass=ABCMeta):
 	pass
