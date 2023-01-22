@@ -19,7 +19,7 @@ from .requestObj import Request
 _dumpRequest:Callable[[T_Request], Any] = lambda x: x._dumps()
 
 class Client(T_Client):
-	max_bulk_request:int = 0xFF
+	max_bulk_request:int = 100
 	FSPACKER_VERSION:int = fsPacker.HIGHEST_VERSION
 	def __init__(self, protocol:str, target:Union[str, Tuple[str, int], Tuple[str, int, int, int]],
 	connectTimeout:Union[int, float]=15, transferTimeout:Union[int, float]=320, retryCount:int=10,
@@ -151,7 +151,6 @@ class Client(T_Client):
 			if objs:
 				objs.sort(key=lambda x: x._requestTime)
 				self.log.info("Sending {} previous requests", len(objs))
-				chunkToSend:Any
 				if self.useBulkRequest and len(objs) > 1:
 					for chunk in iterSplit(list(map(_dumpRequest, objs)), self.max_bulk_request):
 						self._sendRequest(chunk)
