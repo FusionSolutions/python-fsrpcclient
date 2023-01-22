@@ -147,15 +147,24 @@ class Client(T_Client):
 		self.socket.connect()
 		self.log.info("Connected")
 		if sendOlderRequests:
+			obj:T_Request
 			objs:List[T_Request] = list(filter(lambda x: not x.isDone(), self.requests.values()))
 			if objs:
 				objs.sort(key=lambda x: x._requestTime)
 				self.log.info("Sending {} previous requests", len(objs))
 				if self.useBulkRequest and len(objs) > 1:
-					for chunk in iterSplit(list(map(_dumpRequest, objs)), self.max_bulk_request):
-						self._sendRequest(chunk)
-				else:
+					# Ossze kell valogatni httpMethod es path alapjan
+					chunks:Dict[Tuple[str, str, str], List[Any]] = {}
 					for obj in objs:
+						p:Tuple[str, str, str] = (obj._httpMethod, obj._path, json.dumps(obj._httpHeaders, sort_keys=True))
+						if p not in chunks:
+							chunks[p] = []
+						chunks[p].append(obj._dumps())
+					for (httpMethod, path, jsonHttpHeaders), allChunksData in chunks.items():
+						for chunkData in self.signal.iter(iterSplit(allChunksData, self.max_bulk_request)):
+							self._sendRequest(chunkData, httpMethod, path, json.loads(jsonHttpHeaders))
+				else:
+					for obj in self.signal.iter(objs):
 						self._sendRequest(obj._dumps(), obj._httpMethod, obj._path, obj._httpHeaders)
 	def _sendRequest(self, data:Any, httpMethod:str="POST", path:str="/", httpHeaders:Dict[str, str]={}) -> None:
 		payload:bytes = b""

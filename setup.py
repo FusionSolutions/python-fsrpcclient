@@ -9,7 +9,7 @@ pwd = os.path.abspath(os.path.dirname(__file__))
 
 setup(
 	name                          = "python-fsrpcclient",
-	version                       = "0.4.1",
+	version                       = "0.4.2",
 	description                   = "Fusion Solutions RPC client",
 	keywords                      = "json rpc client fusion solutions fusionsolutions",
 	author                        = "Andor `iFA` Rajci - FUSION SOLUTIONS KFT",
