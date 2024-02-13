@@ -63,7 +63,6 @@ class T_Client(metaclass=ABCMeta):
 	extraHttpHeaders:Dict[str, str]
 	disableCompression:bool
 	useBulkRequest:bool
-	convertNumbers:Optional[str]
 	log:T_Logger
 	signal:T_Signal
 	id:int
@@ -227,7 +226,6 @@ class T_Request(metaclass=ABCMeta):
 	_httpMethod:str
 	_httpHeaders:Dict[str, str]
 	_payload:str
-	_convertNumbers:Optional[str]
 	_requestTime:float
 	_responseTime:float
 	_httpStatus:Optional[HTTPStatus]

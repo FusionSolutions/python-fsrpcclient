@@ -25,8 +25,7 @@ class Client(T_Client):
 	connectTimeout:Union[int, float]=15, transferTimeout:Union[int, float]=320, retryCount:int=10,
 	retryDelay:Union[int, float]=5, ssl:bool=False, sslHostname:Optional[str]=None, httpHost:Optional[str]=None,
 	extraHttpHeaders:Dict[str, str]={}, path:str="/", disableCompression:bool=False, useBulkRequest:bool=True,
-	convertNumbers:Optional[str]=None, bind:Optional[T_SocketBindAddress]=None, log:Optional[T_Logger]=None,
-	signal:Optional[T_Signal]=None) -> None:
+	bind:Optional[T_SocketBindAddress]=None, log:Optional[T_Logger]=None, signal:Optional[T_Signal]=None) -> None:
 		self.protocol           = protocol
 		self.target             = target
 		self.connectTimeout     = float(connectTimeout)
@@ -40,7 +39,6 @@ class Client(T_Client):
 		self.path               = path
 		self.disableCompression = disableCompression
 		self.useBulkRequest     = useBulkRequest
-		self.convertNumbers     = convertNumbers
 		self.bind               = bind
 		self.log                = log or Logger("RPCClient")
 		self.signal             = signal or HardSignal()
@@ -55,8 +53,6 @@ class Client(T_Client):
 			raise InitializationError("`retryCount` must be positive integer")
 		if self.retryDelay < 0:
 			raise InitializationError("`retryDelay` must be greater or equal than 0")
-		if self.convertNumbers is not None and self.convertNumbers not in ["default", "none", "hex", "str"]:
-			raise InitializationError("When `convertNumbers` is set, then most be the following one: default, none, hex or str")
 		self._initializeProtocol()
 	def _initializeProtocol(self) -> None:
 		if ":" not in self.protocol:
@@ -118,7 +114,6 @@ class Client(T_Client):
 			"path":              self.path,
 			"disableCompression":self.disableCompression,
 			"useBulkRequest":    self.useBulkRequest,
-			"convertNumbers":    self.convertNumbers,
 			"bind":              self.bind,
 			"log":               self.log,
 			"signal":            self.signal,
@@ -137,7 +132,6 @@ class Client(T_Client):
 		self.path               = states["path"]
 		self.disableCompression = states["disableCompression"]
 		self.useBulkRequest     = states["useBulkRequest"]
-		self.convertNumbers     = states["convertNumbers"]
 		self.bind               = states["bind"]
 		self.log                = states["log"]
 		self.signal             = states["signal"]
@@ -305,7 +299,7 @@ class Client(T_Client):
 					self.socketErrors += 1
 					continue
 				raise
-	def _parseResponse(self, payload:bytes, headers:Optional[T_Headers]=None, charset:str="utf8",
+	def _parseResponse(self, payload:bytes, headers:Optional[T_Headers]=None, charset:str="utf-8",
 	httpStatus:Optional[HTTPStatus]=None) -> None:
 		if self.requestProtocol in ["JSONRPC-2", "JSONRPC-P"]:
 			try:
@@ -437,7 +431,6 @@ class Client(T_Client):
 			httpMethod,
 			rHttpHeaders,
 			payload,
-			self.convertNumbers,
 		)
 		self.requests[id] = obj
 		self.log.info("Request queued: {} [{}]".format(method, id))

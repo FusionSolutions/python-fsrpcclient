@@ -9,8 +9,7 @@ from .abcs import T_Request, T_Client, NoPayload
 # Program
 class Request(T_Request):
 	def __init__(self, client:T_Client, id:Any, method:str, args:List[Any], kwargs:Dict[str, Any], path:str="/",
-	httpMethod:str="POST", httpHeaders:Dict[str, str]={}, payload:Any=NoPayload,
-	convertNumbers:Optional[str]=None) -> None:
+	httpMethod:str="POST", httpHeaders:Dict[str, str]={}, payload:Any=NoPayload) -> None:
 		self._client         = client
 		self._id             = id
 		self._method         = method
@@ -20,7 +19,6 @@ class Request(T_Request):
 		self._httpMethod     = httpMethod
 		self._httpHeaders    = httpHeaders
 		self._payload        = payload
-		self._convertNumbers = convertNumbers
 		#
 		self._requestTime  = monotonic()
 		self._responseTime = 0.0
@@ -49,8 +47,6 @@ class Request(T_Request):
 				"method":self._method,
 				"id":self._id,
 			}
-			if self._convertNumbers is not None:
-				r["convertNumbers"] = self._convertNumbers
 		elif self._client.requestProtocol == "JSONRPC-P":
 			r = {
 				"jsonrpc":"python",
@@ -59,8 +55,6 @@ class Request(T_Request):
 				"method":self._method,
 				"id":self._id,
 			}
-			if self._convertNumbers is not None:
-				r["convertNumbers"] = self._convertNumbers
 		elif self._client.requestProtocol in ("REST", "RAW"):
 			r = self._payload
 		elif self._client.requestProtocol == "FSP":
