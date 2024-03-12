@@ -307,6 +307,8 @@ class BaseClientSocket(T_BaseClientSocket):
 			raise
 	def parseReadBuffer(self) -> bool:
 		raise RuntimeError
+	def __del__(self) -> None:
+		self.poll.close()
 
 class HTTPClientSocket(BaseClientSocket, T_HTTPClientSocket):
 	defaultHeaders = {
