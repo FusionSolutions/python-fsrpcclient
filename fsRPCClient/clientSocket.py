@@ -267,6 +267,7 @@ class BaseClientSocket(T_BaseClientSocket):
 			self.mask = EVENT_READ
 			self._reset()
 			self.log.debug("Closed")
+		self.poll.close()
 	def connect(self) -> None:
 		if self.connectionStatus != NOT_CONNECTED:
 			return
@@ -308,7 +309,7 @@ class BaseClientSocket(T_BaseClientSocket):
 	def parseReadBuffer(self) -> bool:
 		raise RuntimeError
 	def __del__(self) -> None:
-		self.poll.close()
+		self.close()
 
 class HTTPClientSocket(BaseClientSocket, T_HTTPClientSocket):
 	defaultHeaders = {
